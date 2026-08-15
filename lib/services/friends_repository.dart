@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+
+import 'notification_feed_repository.dart';
 
 class FriendsRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -101,6 +105,14 @@ class FriendsRepository {
     });
 
     await batch.commit();
+
+    // Best-effort — don't block the request itself on notification delivery.
+    unawaited(
+      NotificationFeedRepository().notifyFriendRequest(
+        toUserId: targetUid,
+        fromUserId: uid,
+      ),
+    );
   }
 
   Future<void> acceptFriendRequest(String targetUid) async {

@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:first_app/UI/add_post_screen.dart';
-import 'package:first_app/UI/friends_screen.dart';
 import 'package:first_app/UI/home_chats_screen.dart';
 import 'package:first_app/UI/user_profile_screen.dart';
 import 'package:first_app/UI/view_story_screen.dart';
@@ -101,7 +100,6 @@ class NewsfeedScreen extends StatefulWidget {
 
 class _NewsfeedScreenState extends State<NewsfeedScreen> {
   final _scrollController = ScrollController();
-  int _currentIndex = 0;
   final _postRepo = PostRepository();
   final _friendsRepo = FriendsRepository();
   final _storyRepo = StoryRepository();
@@ -186,40 +184,6 @@ class _NewsfeedScreenState extends State<NewsfeedScreen> {
       return doc.data()!;
     }
     return {};
-  }
-
-  void _onBottomNavTapped(int index) {
-    if (index == 0) {
-      _refreshNewsfeed();
-      return;
-    }
-    if (index == 1) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const FriendsScreen()),
-      );
-      return;
-    }
-    if (index == 2) {
-      _openAddPost();
-      return;
-    }
-    if (index == 3) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeChatsScreen()),
-      );
-      return;
-    }
-    if (index == 4) {
-      final uid = _auth.currentUser?.uid;
-      if (uid == null) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => UserProfileScreen(userId: uid)),
-      );
-      return;
-    }
   }
 
   void _showPostMenu(Map<String, dynamic> post) {
@@ -403,58 +367,12 @@ class _NewsfeedScreenState extends State<NewsfeedScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      body: _currentIndex == 0 ? _buildNewsfeed() : Container(),
-      bottomNavigationBar: _buildBottomNav(Theme.of(context).colorScheme),
-    );
-  }
-
-  Widget _buildBottomNav(ColorScheme colorScheme) {
+    // No Scaffold/bottom nav here anymore — this screen is embedded as a
+    // tab body inside MainNavigationScreen, which owns the persistent
+    // bottom navigation bar.
     return Container(
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        border: Border(
-          top: BorderSide(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.4),
-          ),
-        ),
-      ),
-      child: SafeArea(
-        child: SizedBox(
-          height: 64,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _NavItem(
-                icon: Icons.home_rounded,
-                label: 'Home',
-                selected: _currentIndex == 0,
-                onTap: () => _onBottomNavTapped(0),
-              ),
-              _NavItem(
-                icon: Icons.search_rounded,
-                label: 'Explore',
-                selected: false,
-                onTap: () => _onBottomNavTapped(1),
-              ),
-              _CreateNavButton(onTap: () => _onBottomNavTapped(2)),
-              _NavItem(
-                icon: Icons.chat_bubble_outline_rounded,
-                label: 'Chats',
-                selected: false,
-                onTap: () => _onBottomNavTapped(3),
-              ),
-              _NavItem(
-                icon: Icons.person_outline_rounded,
-                label: 'Profile',
-                selected: false,
-                onTap: () => _onBottomNavTapped(4),
-              ),
-            ],
-          ),
-        ),
-      ),
+      color: Theme.of(context).colorScheme.surface,
+      child: _buildNewsfeed(),
     );
   }
 
@@ -637,7 +555,11 @@ class _NewsfeedScreenState extends State<NewsfeedScreen> {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder:
-                      (_) => ViewStoryScreen(user: userData, stories: stories),
+                      (_) => ViewStoryScreen(
+                        user: userData,
+                        stories: stories,
+                        storyId: '',
+                      ),
                 ),
               );
             }
@@ -1071,76 +993,6 @@ class _NewsfeedScreenState extends State<NewsfeedScreen> {
     return CircleAvatar(
       radius: radius,
       child: Icon(Icons.person, size: radius),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  const _NavItem({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final color = selected ? colorScheme.primary : colorScheme.onSurfaceVariant;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: SizedBox(
-        width: 56,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 2),
-            Text(label, style: TextStyle(fontSize: 10, color: color)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CreateNavButton extends StatelessWidget {
-  const _CreateNavButton({required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Transform.translate(
-      offset: const Offset(0, -10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(28),
-        child: Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: colorScheme.primary,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: colorScheme.primary.withValues(alpha: 0.35),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Icon(Icons.add, color: colorScheme.onPrimary, size: 28),
-        ),
-      ),
     );
   }
 }

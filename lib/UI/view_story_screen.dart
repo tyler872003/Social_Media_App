@@ -13,6 +13,7 @@ class ViewStoryScreen extends StatefulWidget {
     super.key,
     required this.user,
     required this.stories,
+    required String storyId,
   });
 
   @override
@@ -26,23 +27,24 @@ class _ViewStoryScreenState extends State<ViewStoryScreen> {
   @override
   void initState() {
     super.initState();
-    _storyItems = widget.stories.map((doc) {
-      final data = doc.data();
-      final base64String = data['base64Data'] as String? ?? '';
-      
-      return StoryItem(
-        Container(
-          color: Colors.black,
-          child: Center(
-            child: Image.memory(
-              base64Decode(base64String),
-              fit: BoxFit.contain,
+    _storyItems =
+        widget.stories.map((doc) {
+          final data = doc.data();
+          final base64String = data['base64Data'] as String? ?? '';
+
+          return StoryItem(
+            Container(
+              color: Colors.black,
+              child: Center(
+                child: Image.memory(
+                  base64Decode(base64String),
+                  fit: BoxFit.contain,
+                ),
+              ),
             ),
-          ),
-        ),
-        duration: const Duration(seconds: 5),
-      );
-    }).toList();
+            duration: const Duration(seconds: 5),
+          );
+        }).toList();
   }
 
   @override
@@ -82,9 +84,15 @@ class _ViewStoryScreenState extends State<ViewStoryScreen> {
                 final doc = widget.stories[index];
                 final uid = FirebaseAuth.instance.currentUser?.uid;
                 if (uid != null) {
-                  FirebaseFirestore.instance.collection('stories').doc(doc.id).update({
-                    'viewers': FieldValue.arrayUnion([uid])
-                  }).catchError((_) {}); // ignore errors if we lack permission
+                  FirebaseFirestore.instance
+                      .collection('stories')
+                      .doc(doc.id)
+                      .update({
+                        'viewers': FieldValue.arrayUnion([uid]),
+                      })
+                      .catchError(
+                        (_) {},
+                      ); // ignore errors if we lack permission
                 }
               }
             },
@@ -109,9 +117,14 @@ class _ViewStoryScreenState extends State<ViewStoryScreen> {
                     radius: 20,
                     backgroundColor: Colors.grey.shade300,
                     backgroundImage: imageProvider,
-                    child: imageProvider == null
-                        ? const Icon(Icons.person, color: Colors.white, size: 24)
-                        : null,
+                    child:
+                        imageProvider == null
+                            ? const Icon(
+                              Icons.person,
+                              color: Colors.white,
+                              size: 24,
+                            )
+                            : null,
                   ),
                   const SizedBox(width: 12),
                   Text(
@@ -120,12 +133,7 @@ class _ViewStoryScreenState extends State<ViewStoryScreen> {
                       color: Colors.white,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      shadows: [
-                        Shadow(
-                          color: Colors.black54,
-                          blurRadius: 4,
-                        ),
-                      ],
+                      shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
                     ),
                   ),
                   const Spacer(),

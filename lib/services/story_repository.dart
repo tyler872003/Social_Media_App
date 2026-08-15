@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
+import 'notification_feed_repository.dart';
+
 class StoryRepository {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
@@ -19,13 +21,28 @@ class StoryRepository {
       now.toDate().add(const Duration(hours: 24)),
     );
 
-    await _db.collection('stories').add({
+    final docRef = await _db.collection('stories').add({
       'userId': user.uid,
       'base64Data': base64Data,
       'createdAt': now,
       'expiresAt': expiresAt,
       'viewers': <String>[],
     });
+
+    // Best-effort — don't block posting the story on notification delivery.
+    unawaited(_notifyFriendsOfNewStory(user.uid, docRef.id));
+  }
+
+  Future<void> _notifyFriendsOfNewStory(String uid, String storyId) async {
+    final userDoc = await _db.collection('users').doc(uid).get();
+    final friends = List<String>.from(userDoc.data()?['friends'] ?? []);
+    if (friends.isEmpty) return;
+
+    await NotificationFeedRepository().notifyNewStory(
+      friendIds: friends,
+      fromUserId: uid,
+      storyId: storyId,
+    );
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> activeStoriesStream() {
@@ -86,4 +103,3 @@ class StoryRepository {
     await _db.collection('stories').doc(storyId).delete();
   }
 }
-

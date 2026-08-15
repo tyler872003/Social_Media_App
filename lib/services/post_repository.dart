@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
+import 'notification_feed_repository.dart';
 
 class PostRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -46,6 +50,45 @@ class PostRepository {
       'timestamp': FieldValue.serverTimestamp(),
       'createdAt': DateTime.now().millisecondsSinceEpoch,
     });
+
+    // Best-effort — don't block post creation on notification delivery.
+    unawaited(
+      _notifyFriendsOfNewPost(
+        uid: uid,
+        postId: docRef.id,
+        privacy: privacy,
+        closedFriendsIds: closedFriendsIds,
+        thumbnail: base64Images.isNotEmpty ? base64Images.first : null,
+      ),
+    );
+  }
+
+  Future<void> _notifyFriendsOfNewPost({
+    required String uid,
+    required String postId,
+    required String privacy,
+    required List<String> closedFriendsIds,
+    String? thumbnail,
+  }) async {
+    if (privacy == 'private') return;
+
+    final userDoc = await _firestore.collection('users').doc(uid).get();
+    final friends = List<String>.from(userDoc.data()?['friends'] ?? []);
+    if (friends.isEmpty) return;
+
+    final recipients =
+        privacy == 'closedFriends'
+            ? friends.where(closedFriendsIds.contains).toList()
+            : friends; // 'public' or 'friends' — every friend can see it
+
+    if (recipients.isEmpty) return;
+
+    await NotificationFeedRepository().notifyNewPost(
+      friendIds: recipients,
+      fromUserId: uid,
+      postId: postId,
+      thumbnail: thumbnail,
+    );
   }
 
   Future<void> updatePostDownloadPermission(String postId, bool allow) async {

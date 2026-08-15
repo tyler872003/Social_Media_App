@@ -138,48 +138,58 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16.0,
-              vertical: 8.0,
-            ),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              decoration: BoxDecoration(
-                color:
-                    Theme.of(context).brightness == Brightness.light
-                        ? Colors.grey.shade200
-                        : Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(24),
+      // Everything below — search bar, "Add Story" row, and the chat list —
+      // now lives inside ONE CustomScrollView, so the search bar and
+      // stories row scroll away together with the list instead of staying
+      // pinned above it.
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 8.0,
               ),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (value) {
-                  setState(() => _searchQuery = value.trim().toLowerCase());
-                },
-                decoration: const InputDecoration(
-                  hintText: 'Search',
-                  filled: false,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  errorBorder: InputBorder.none,
-                  disabledBorder: InputBorder.none,
-                  isCollapsed: true,
-                  contentPadding: EdgeInsets.symmetric(vertical: 14),
-                  icon: Icon(Icons.search),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                decoration: BoxDecoration(
+                  color:
+                      Theme.of(context).brightness == Brightness.light
+                          ? Colors.grey.shade200
+                          : Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (value) {
+                    setState(() => _searchQuery = value.trim().toLowerCase());
+                  },
+                  decoration: const InputDecoration(
+                    hintText: 'Search',
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    errorBorder: InputBorder.none,
+                    disabledBorder: InputBorder.none,
+                    isCollapsed: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 14),
+                    icon: Icon(Icons.search),
+                  ),
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
           // FIX: Pass shared stream down to StoriesSection
-          StoriesSection(storiesStream: _storiesStream),
-          const SizedBox(height: 8),
-          Expanded(
-            // FIX: Use shared stories stream here too — no extra Firestore reads
+          SliverToBoxAdapter(
+            child: StoriesSection(storiesStream: _storiesStream),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 8)),
+          // FIX: Use shared stories stream here too — no extra Firestore reads
+          SliverToBoxAdapter(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _storiesStream,
               builder: (context, activeStoriesSnapshot) {
@@ -259,11 +269,21 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
                                   if (matchingGroups.isEmpty &&
                                       matchingUsers.isEmpty) {
                                     return const Center(
-                                      child: Text('No results found.'),
+                                      child: Padding(
+                                        padding: EdgeInsets.all(32.0),
+                                        child: Text('No results found.'),
+                                      ),
                                     );
                                   }
 
+                                  // shrinkWrap + NeverScrollableScrollPhysics:
+                                  // this list no longer scrolls on its own —
+                                  // it lays out at full height and lets the
+                                  // outer CustomScrollView do the scrolling.
                                   return ListView(
+                                    shrinkWrap: true,
+                                    physics:
+                                        const NeverScrollableScrollPhysics(),
                                     children: [
                                       ...matchingGroups.map((g) {
                                         final data = g.data();
@@ -636,7 +656,16 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
                                       (a, b) => b.key.compareTo(a.key),
                                     );
 
+                                    // shrinkWrap + NeverScrollableScrollPhysics:
+                                    // same reasoning as the search-results
+                                    // list above — this list lays out at
+                                    // full height inside the outer
+                                    // CustomScrollView instead of scrolling
+                                    // on its own.
                                     return ListView(
+                                      shrinkWrap: true,
+                                      physics:
+                                          const NeverScrollableScrollPhysics(),
                                       children:
                                           entries.map((e) => e.value).toList(),
                                     );
@@ -651,7 +680,7 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
                   }, // notifSnapshot builder
                 ); // notifRepo settingsStream StreamBuilder
               },
-            ), // storiesStream Expanded
+            ),
           ),
         ],
       ),
@@ -703,8 +732,11 @@ class _UserListTile extends StatelessWidget {
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder:
-                          (_) =>
-                              ViewStoryScreen(user: data, stories: userStories),
+                          (_) => ViewStoryScreen(
+                            user: data,
+                            stories: userStories,
+                            storyId: '',
+                          ),
                     ),
                   );
                 }
@@ -1043,7 +1075,11 @@ class StoryItemWidget extends StatelessWidget {
             Navigator.of(context).push(
               MaterialPageRoute(
                 builder:
-                    (_) => ViewStoryScreen(user: userData, stories: stories),
+                    (_) => ViewStoryScreen(
+                      user: userData,
+                      stories: stories,
+                      storyId: '',
+                    ),
               ),
             );
           },

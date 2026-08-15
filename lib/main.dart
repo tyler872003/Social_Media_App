@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:first_app/UI/email_verification_screen.dart';
-import 'package:first_app/UI/newsfeed_screen.dart';
+import 'package:first_app/UI/main_navigation_screen.dart';
 import 'package:first_app/UI/login_screen_view.dart';
 import '../firebase_options.dart';
 import 'package:first_app/services/app_theme_service.dart';
@@ -86,7 +86,7 @@ class _AuthGateState extends State<AuthGate> {
               },
             );
           }
-          return const IncomingCallListener(child: NewsfeedScreen());
+          return const IncomingCallListener(child: MainNavigationScreen());
         }
 
         // Stop notifications on logout
