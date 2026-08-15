@@ -47,9 +47,9 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to create group: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to create group: $e')));
       }
     } finally {
       if (mounted) {
@@ -62,14 +62,18 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
   Widget build(BuildContext context) {
     final repo = ChatRepository();
     final self = FirebaseAuth.instance.currentUser;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: colorScheme.surface,
         elevation: 0,
-        title: const Text('Create Group', style: TextStyle(color: Colors.black)),
-        iconTheme: const IconThemeData(color: Colors.black),
+        title: Text(
+          'Create Group',
+          style: TextStyle(color: colorScheme.onSurface),
+        ),
+        iconTheme: IconThemeData(color: colorScheme.onSurface),
         actions: [
           if (_isCreating)
             const Padding(
@@ -83,7 +87,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
           else
             TextButton(
               onPressed: _createGroup,
-              child: const Text('Create', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text(
+                'Create',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
         ],
       ),
@@ -96,7 +103,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
               decoration: InputDecoration(
                 hintText: 'Group Name',
                 filled: true,
-                fillColor: Colors.grey.shade200,
+                fillColor: colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -105,7 +112,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16.0,
+              vertical: 8.0,
+            ),
             child: TextField(
               controller: _searchController,
               onChanged: (value) {
@@ -115,9 +125,12 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
               },
               decoration: InputDecoration(
                 hintText: 'Search members...',
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 filled: true,
-                fillColor: Colors.grey.shade200,
+                fillColor: colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -125,13 +138,20 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
               ),
             ),
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16.0,
+              vertical: 8.0,
+            ),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 'Select Members',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
@@ -146,23 +166,27 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                var docs = snapshot.data!.docs
-                    .where((d) => d.id != self?.uid)
-                    .toList();
+                var docs =
+                    snapshot.data!.docs
+                        .where((d) => d.id != self?.uid)
+                        .toList();
 
                 if (_searchQuery.isNotEmpty) {
-                  docs = docs.where((d) {
-                    final data = d.data();
-                    final displayName = (data['displayName'] as String?)?.toLowerCase() ?? '';
-                    final email = (data['email'] as String?)?.toLowerCase() ?? '';
-                    return displayName.contains(_searchQuery) || email.contains(_searchQuery);
-                  }).toList();
+                  docs =
+                      docs.where((d) {
+                        final data = d.data();
+                        final displayName =
+                            (data['displayName'] as String?)?.toLowerCase() ??
+                            '';
+                        final email =
+                            (data['email'] as String?)?.toLowerCase() ?? '';
+                        return displayName.contains(_searchQuery) ||
+                            email.contains(_searchQuery);
+                      }).toList();
                 }
 
                 if (docs.isEmpty) {
-                  return const Center(
-                    child: Text('No users found.'),
-                  );
+                  return const Center(child: Text('No users found.'));
                 }
 
                 return ListView.builder(
@@ -170,11 +194,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                   itemBuilder: (context, index) {
                     final doc = docs[index];
                     final data = doc.data();
-                    final displayName = (data['displayName'] as String?)?.trim();
-                    final title = (displayName != null && displayName.isNotEmpty)
-                        ? displayName
-                        : 'User';
-                    
+                    final displayName =
+                        (data['displayName'] as String?)?.trim();
+                    final title =
+                        (displayName != null && displayName.isNotEmpty)
+                            ? displayName
+                            : 'User';
+
                     final isSelected = _selectedUserIds.contains(doc.id);
 
                     return CheckboxListTile(
@@ -188,7 +214,10 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                           }
                         });
                       },
-                      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+                      title: Text(
+                        title,
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
                       activeColor: Colors.blueAccent,
                       controlAffinity: ListTileControlAffinity.leading,
                     );

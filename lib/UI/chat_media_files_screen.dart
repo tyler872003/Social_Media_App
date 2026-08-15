@@ -1,9 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:first_app/services/chat_repository.dart';
+import 'package:first_app/UI/photo_viewer_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart' as fp;
+import 'package:gal/gal.dart'; // pubspec: gal: ^2.3.0
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -83,6 +87,14 @@ class _ChatMediaFilesScreenState extends State<ChatMediaFilesScreen> {
     return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
+  String _stripDataUriPrefix(String data) {
+    final commaIndex = data.indexOf(',');
+    if (data.startsWith('data:') && commaIndex != -1) {
+      return data.substring(commaIndex + 1);
+    }
+    return data;
+  }
+
   Future<void> _openExternalLink(String rawLink) async {
     var link = rawLink.trim();
     if (!link.startsWith('http://') && !link.startsWith('https://')) {
@@ -107,7 +119,7 @@ class _ChatMediaFilesScreenState extends State<ChatMediaFilesScreen> {
     }
 
     try {
-      final bytes = base64Decode(base64Data);
+      final bytes = base64Decode(_stripDataUriPrefix(base64Data));
       final tempDir = await getTemporaryDirectory();
       final fileName =
           (m['fileName'] as String?)?.trim().isNotEmpty == true
@@ -122,6 +134,80 @@ class _ChatMediaFilesScreenState extends State<ChatMediaFilesScreen> {
     } catch (_) {
       _showSnack('Failed to open file');
     }
+  }
+
+  /// Saves any file (documents, audio) to a user-chosen location via the
+  /// native "Save As" dialog — Downloads, Drive, Files app, etc.
+  Future<void> _downloadGenericFile(
+    Map<String, dynamic> m, {
+    required String defaultFileName,
+  }) async {
+    final base64Data = (m['base64Data'] as String?)?.trim();
+    if (base64Data == null || base64Data.isEmpty) {
+      _showSnack('File data is empty');
+      return;
+    }
+    try {
+      final bytes = base64Decode(_stripDataUriPrefix(base64Data));
+      final fileName =
+          (m['fileName'] as String?)?.trim().isNotEmpty == true
+              ? (m['fileName'] as String).trim()
+              : defaultFileName;
+
+      final savedUri = await fp.FilePicker.saveFile(
+        dialogTitle: 'Save file',
+        fileName: fileName,
+        bytes: Uint8List.fromList(bytes),
+      );
+
+      if (savedUri != null) {
+        _showSnack('Saved $fileName');
+      }
+    } catch (_) {
+      _showSnack('Failed to save file');
+    }
+  }
+
+  /// Saves a video message to the device gallery (same album as photos).
+  /// gal's video API takes a file path, not raw bytes, so we write to a
+  /// temp file first.
+  Future<void> _downloadVideo(Map<String, dynamic> m) async {
+    final base64Data = (m['base64Data'] as String?)?.trim();
+    if (base64Data == null || base64Data.isEmpty) {
+      _showSnack('Video data is empty');
+      return;
+    }
+    try {
+      var hasAccess = await Gal.hasAccess();
+      if (!hasAccess) hasAccess = await Gal.requestAccess();
+      if (!hasAccess) {
+        _showSnack('Photo/video library access denied. Enable it in Settings.');
+        return;
+      }
+
+      final bytes = base64Decode(_stripDataUriPrefix(base64Data));
+      final tempDir = await getTemporaryDirectory();
+      final fileName =
+          (m['fileName'] as String?)?.trim().isNotEmpty == true
+              ? (m['fileName'] as String).trim()
+              : 'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(bytes, flush: true);
+
+      await Gal.putVideo(tempFile.path, album: 'VibeStream');
+      _showSnack('Saved to gallery');
+    } catch (_) {
+      _showSnack('Failed to save video');
+    }
+  }
+
+  void _openPhotoViewer(String base64Data) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder:
+            (_) => PhotoViewerScreen(images: [base64Data], canDownload: true),
+      ),
+    );
   }
 
   void _showSnack(String message) {
@@ -244,13 +330,32 @@ class _ChatMediaFilesScreenState extends State<ChatMediaFilesScreen> {
                       _PhotosTab(
                         items: photos,
                         imageProviderFor: _imageProviderFromMessageBase64,
+                        onOpenPhoto: _openPhotoViewer,
                       ),
-                      _FilesTab(items: files, onOpenFile: _openFileFromMessage),
+                      _FilesTab(
+                        items: files,
+                        onOpenFile: _openFileFromMessage,
+                        onDownloadFile:
+                            (m) => _downloadGenericFile(
+                              m,
+                              defaultFileName:
+                                  'file_${DateTime.now().millisecondsSinceEpoch}',
+                            ),
+                      ),
                       _VideosTab(
                         items: videos,
                         onOpenVideoFile: _openFileFromMessage,
+                        onDownloadVideo: _downloadVideo,
                       ),
-                      _AudioTab(items: audio),
+                      _AudioTab(
+                        items: audio,
+                        onDownloadAudio:
+                            (m) => _downloadGenericFile(
+                              m,
+                              defaultFileName:
+                                  'voice_${DateTime.now().millisecondsSinceEpoch}.m4a',
+                            ),
+                      ),
                       _LinksTab(
                         items: uniqueLinks,
                         onOpenLink: _openExternalLink,
@@ -268,10 +373,15 @@ class _ChatMediaFilesScreenState extends State<ChatMediaFilesScreen> {
 }
 
 class _PhotosTab extends StatelessWidget {
-  const _PhotosTab({required this.items, required this.imageProviderFor});
+  const _PhotosTab({
+    required this.items,
+    required this.imageProviderFor,
+    required this.onOpenPhoto,
+  });
 
   final List<Map<String, dynamic>> items;
   final ImageProvider? Function(String? base64Data) imageProviderFor;
+  final void Function(String base64Data) onOpenPhoto;
 
   @override
   Widget build(BuildContext context) {
@@ -291,7 +401,7 @@ class _PhotosTab extends StatelessWidget {
         final m = items[index];
         final base64Data = m['base64Data'] as String?;
         final provider = imageProviderFor(base64Data);
-        if (provider == null) {
+        if (provider == null || base64Data == null) {
           return Container(
             color: Colors.grey.shade200,
             child: const Center(child: Icon(Icons.broken_image)),
@@ -299,13 +409,7 @@ class _PhotosTab extends StatelessWidget {
         }
 
         return InkWell(
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => _FullImageScreen(imageProvider: provider),
-              ),
-            );
-          },
+          onTap: () => onOpenPhoto(base64Data),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Image(image: provider, fit: BoxFit.cover),
@@ -317,10 +421,15 @@ class _PhotosTab extends StatelessWidget {
 }
 
 class _FilesTab extends StatelessWidget {
-  const _FilesTab({required this.items, required this.onOpenFile});
+  const _FilesTab({
+    required this.items,
+    required this.onOpenFile,
+    required this.onDownloadFile,
+  });
 
   final List<Map<String, dynamic>> items;
   final Future<void> Function(Map<String, dynamic> message) onOpenFile;
+  final Future<void> Function(Map<String, dynamic> message) onDownloadFile;
 
   @override
   Widget build(BuildContext context) {
@@ -344,7 +453,11 @@ class _FilesTab extends StatelessWidget {
           title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle:
               subtitle == null || subtitle.isEmpty ? null : Text(subtitle),
-          trailing: const Icon(Icons.download_outlined),
+          trailing: IconButton(
+            icon: const Icon(Icons.download_outlined),
+            tooltip: 'Download',
+            onPressed: () => onDownloadFile(m),
+          ),
           onTap: () => onOpenFile(m),
         );
       },
@@ -353,10 +466,15 @@ class _FilesTab extends StatelessWidget {
 }
 
 class _VideosTab extends StatelessWidget {
-  const _VideosTab({required this.items, required this.onOpenVideoFile});
+  const _VideosTab({
+    required this.items,
+    required this.onOpenVideoFile,
+    required this.onDownloadVideo,
+  });
 
   final List<Map<String, dynamic>> items;
   final Future<void> Function(Map<String, dynamic> message) onOpenVideoFile;
+  final Future<void> Function(Map<String, dynamic> message) onDownloadVideo;
 
   @override
   Widget build(BuildContext context) {
@@ -377,6 +495,11 @@ class _VideosTab extends StatelessWidget {
           ),
           title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: const Text('Tap to open'),
+          trailing: IconButton(
+            icon: const Icon(Icons.download_outlined),
+            tooltip: 'Save to gallery',
+            onPressed: () => onDownloadVideo(m),
+          ),
           onTap: () => onOpenVideoFile(m),
         );
       },
@@ -385,9 +508,10 @@ class _VideosTab extends StatelessWidget {
 }
 
 class _AudioTab extends StatelessWidget {
-  const _AudioTab({required this.items});
+  const _AudioTab({required this.items, required this.onDownloadAudio});
 
   final List<Map<String, dynamic>> items;
+  final Future<void> Function(Map<String, dynamic> message) onDownloadAudio;
 
   @override
   Widget build(BuildContext context) {
@@ -410,6 +534,11 @@ class _AudioTab extends StatelessWidget {
           title: const Text('Voice message'),
           subtitle:
               subtitle == null || subtitle.isEmpty ? null : Text(subtitle),
+          trailing: IconButton(
+            icon: const Icon(Icons.download_outlined),
+            tooltip: 'Download',
+            onPressed: () => onDownloadAudio(m),
+          ),
         );
       },
     );
@@ -443,23 +572,6 @@ class _LinksTab extends StatelessWidget {
           onTap: () => onOpenLink(link),
         );
       },
-    );
-  }
-}
-
-class _FullImageScreen extends StatelessWidget {
-  const _FullImageScreen({required this.imageProvider});
-
-  final ImageProvider imageProvider;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(backgroundColor: Colors.black),
-      body: Center(
-        child: InteractiveViewer(child: Image(image: imageProvider)),
-      ),
     );
   }
 }

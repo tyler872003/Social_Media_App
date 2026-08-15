@@ -54,7 +54,9 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
         return;
       }
 
-      final bytes = base64Decode(widget.images[_currentIndex]);
+      final bytes = base64Decode(
+        _stripDataUriPrefix(widget.images[_currentIndex]),
+      );
       await Gal.putImageBytes(
         Uint8List.fromList(bytes),
         name: 'post_${DateTime.now().millisecondsSinceEpoch}',
@@ -66,6 +68,14 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
     } finally {
       if (mounted) setState(() => _isDownloading = false);
     }
+  }
+
+  String _stripDataUriPrefix(String data) {
+    final commaIndex = data.indexOf(',');
+    if (data.startsWith('data:') && commaIndex != -1) {
+      return data.substring(commaIndex + 1);
+    }
+    return data;
   }
 
   void _showSnack(String msg) {
@@ -110,7 +120,9 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
             itemCount: total,
             onPageChanged: (i) => setState(() => _currentIndex = i),
             itemBuilder: (context, index) {
-              final bytes = base64Decode(widget.images[index]);
+              final bytes = base64Decode(
+                _stripDataUriPrefix(widget.images[index]),
+              );
               return InteractiveViewer(
                 minScale: 1,
                 maxScale: 4,

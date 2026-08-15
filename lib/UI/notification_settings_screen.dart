@@ -13,21 +13,22 @@ class NotificationSettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final repo = NotificationRepository();
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: colorScheme.surface,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Notifications',
           style: TextStyle(
-            color: Colors.black,
+            color: colorScheme.onSurface,
             fontWeight: FontWeight.bold,
             fontSize: 20,
           ),
         ),
-        iconTheme: const IconThemeData(color: Colors.black),
+        iconTheme: IconThemeData(color: colorScheme.onSurface),
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
         stream: repo.settingsStream(),
@@ -88,11 +89,17 @@ class NotificationSettingsScreen extends StatelessWidget {
               const _SectionHeader(title: 'Muted chats'),
 
               if (activeMutes.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   child: Text(
                     'No muted chats. Long-press a chat or use the ⋮ menu inside a chat to mute.',
-                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                    style: TextStyle(
+                      color: colorScheme.onSurfaceVariant,
+                      fontSize: 14,
+                    ),
                   ),
                 )
               else
@@ -102,11 +109,11 @@ class NotificationSettingsScreen extends StatelessWidget {
                       repo.muteStatusLabel(settings, chatId) ?? 'Muted';
 
                   return ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: Color(0xFFF0F0F0),
+                    leading: CircleAvatar(
+                      backgroundColor: colorScheme.surfaceContainerHighest,
                       child: Icon(
                         Icons.notifications_off_outlined,
-                        color: Colors.grey,
+                        color: colorScheme.onSurfaceVariant,
                         size: 20,
                       ),
                     ),
@@ -118,7 +125,10 @@ class NotificationSettingsScreen extends StatelessWidget {
                     ),
                     subtitle: Text(
                       label,
-                      style: const TextStyle(color: Colors.grey, fontSize: 13),
+                      style: TextStyle(
+                        color: colorScheme.onSurfaceVariant,
+                        fontSize: 13,
+                      ),
                     ),
                     trailing: TextButton(
                       onPressed: () async {
@@ -165,10 +175,10 @@ class _SectionHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
       child: Text(
         title.toUpperCase(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.bold,
-          color: Colors.grey,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
           letterSpacing: 0.8,
         ),
       ),
@@ -193,15 +203,17 @@ class _ToggleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return SwitchListTile(
       secondary: CircleAvatar(
         backgroundColor:
             value
                 ? Colors.blueAccent.withValues(alpha: 0.1)
-                : const Color(0xFFF0F0F0),
+                : colorScheme.surfaceContainerHighest,
         child: Icon(
           icon,
-          color: value ? Colors.blueAccent : Colors.grey,
+          color: value ? Colors.blueAccent : colorScheme.onSurfaceVariant,
           size: 20,
         ),
       ),
@@ -211,7 +223,7 @@ class _ToggleTile extends StatelessWidget {
       ),
       subtitle: Text(
         subtitle,
-        style: const TextStyle(color: Colors.grey, fontSize: 13),
+        style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13),
       ),
       value: value,
       activeThumbColor: Colors.blueAccent,

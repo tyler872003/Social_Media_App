@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:first_app/UI/friends_list_screen.dart';
 import 'package:first_app/UI/profile_settings_screen.dart';
 import 'package:first_app/services/friends_repository.dart';
 import 'package:first_app/services/post_repository.dart';
@@ -177,6 +178,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
+  void _openFriendsList(List<String> friends) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => FriendsListScreen(friendIds: friends)),
+    );
+  }
+
   Widget _buildAvatar(String? photoUrl, double radius) {
     if (photoUrl != null && photoUrl.isNotEmpty) {
       if (photoUrl.startsWith('data:image')) {
@@ -272,9 +280,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                       count: postCount,
                                       label: 'Posts',
                                     ),
-                                    _StatColumn(
-                                      count: friends.length,
-                                      label: 'Friends',
+                                    GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTap: () => _openFriendsList(friends),
+                                      child: _StatColumn(
+                                        count: friends.length,
+                                        label: 'Friends',
+                                      ),
                                     ),
                                   ],
                                 );
@@ -303,28 +315,115 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                       ],
                       if (!_isOwnProfile) ...[
                         const SizedBox(height: 12),
-                        if (isFriend)
-                          OutlinedButton.icon(
-                            onPressed: null,
-                            icon: const Icon(Icons.check, size: 18),
-                            label: const Text('Friends'),
-                          )
-                        else
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              await _friendsRepo.sendFriendRequest(
-                                widget.userId,
-                              );
-                              if (!context.mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Friend request sent'),
-                                ),
-                              );
-                            },
-                            icon: const Icon(Icons.person_add, size: 18),
-                            label: const Text('Add Friend'),
+                        StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                          stream: _friendsRepo.requestStatusStream(
+                            widget.userId,
                           ),
+                          builder: (context, reqSnap) {
+                            final reqType =
+                                reqSnap.data?.data()?['type'] as String?;
+
+                            if (isFriend) {
+                              return OutlinedButton.icon(
+                                onPressed: null,
+                                icon: const Icon(Icons.check, size: 18),
+                                label: const Text('Friends'),
+                              );
+                            }
+
+                            if (reqType == 'sent') {
+                              return OutlinedButton.icon(
+                                onPressed: () async {
+                                  await _friendsRepo.declineFriendRequest(
+                                    widget.userId,
+                                  );
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Friend request cancelled'),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.schedule_send, size: 18),
+                                label: const Text('Request Sent'),
+                              );
+                            }
+
+                            if (reqType == 'received') {
+                              return Row(
+                                children: [
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      onPressed: () async {
+                                        try {
+                                          await _friendsRepo
+                                              .acceptFriendRequest(
+                                                widget.userId,
+                                              );
+                                          if (!context.mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text('Friend accepted!'),
+                                            ),
+                                          );
+                                        } catch (e) {
+                                          if (!context.mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text('Error: $e'),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      icon: const Icon(Icons.check, size: 18),
+                                      label: const Text('Accept'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () async {
+                                        await _friendsRepo.declineFriendRequest(
+                                          widget.userId,
+                                        );
+                                        if (!context.mounted) return;
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Request declined'),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.close, size: 18),
+                                      label: const Text('Decline'),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+
+                            return OutlinedButton.icon(
+                              onPressed: () async {
+                                await _friendsRepo.sendFriendRequest(
+                                  widget.userId,
+                                );
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Friend request sent'),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.person_add, size: 18),
+                              label: const Text('Add Friend'),
+                            );
+                          },
+                        ),
                       ],
                     ],
                   ),
@@ -486,7 +585,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                           base64Decode(images.first),
                                           fit: BoxFit.cover,
                                           errorBuilder:
-                                              (_, _, _) => const Icon(
+                                              (_, __, ___) => const Icon(
                                                 Icons.broken_image,
                                               ),
                                         ),
@@ -733,7 +832,6 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                   child: Text(caption),
                 ),
               ),
-            // 2 tabs
             TabBar(
               controller: _tabController,
               tabs: [
@@ -745,7 +843,6 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  // ── Comments Tab ──────────────────────────
                   Column(
                     children: [
                       Expanded(
@@ -950,8 +1047,6 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                       ),
                     ],
                   ),
-
-                  // ── Reactions Tab ─────────────────────────
                   reactions.isEmpty
                       ? const Center(child: Text('No reactions yet.'))
                       : ListView.builder(
@@ -994,8 +1089,6 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                 ],
               ),
             ),
-
-            // Owner actions
             if (widget.isOwner) ...[
               const Divider(height: 1),
               Row(

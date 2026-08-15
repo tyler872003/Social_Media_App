@@ -50,6 +50,24 @@ class FriendsRepository {
         .snapshots();
   }
 
+  /// Streams the relationship status between the current user and
+  /// [otherUid]: the doc (if any) at users/{me}/friendRequests/{otherUid}.
+  /// Its 'type' field is 'sent' (I requested them) or 'received' (they
+  /// requested me) — the doc simply doesn't exist if there's no pending
+  /// request either way.
+  Stream<DocumentSnapshot<Map<String, dynamic>>> requestStatusStream(
+    String otherUid,
+  ) {
+    final uid = currentUserId;
+    if (uid == null) return const Stream.empty();
+    return _firestore
+        .collection('users')
+        .doc(uid)
+        .collection('friendRequests')
+        .doc(otherUid)
+        .snapshots();
+  }
+
   Future<void> sendFriendRequest(String targetUid) async {
     final uid = currentUserId;
     if (uid == null || uid == targetUid) return;
@@ -130,6 +148,9 @@ class FriendsRepository {
     }
   }
 
+  /// Deletes any pending request between the current user and [targetUid],
+  /// regardless of direction — works to decline a received request OR
+  /// cancel a request the current user sent.
   Future<void> declineFriendRequest(String targetUid) async {
     final uid = currentUserId;
     if (uid == null) return;

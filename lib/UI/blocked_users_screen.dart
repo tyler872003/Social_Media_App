@@ -8,14 +8,18 @@ class BlockedUsersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final repo = ChatRepository();
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: colorScheme.surface,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: colorScheme.surface,
         elevation: 0,
-        title: const Text('Blocked Users', style: TextStyle(color: Colors.black)),
-        iconTheme: const IconThemeData(color: Colors.black),
+        title: Text(
+          'Blocked Users',
+          style: TextStyle(color: colorScheme.onSurface),
+        ),
+        iconTheme: IconThemeData(color: colorScheme.onSurface),
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
         stream: repo.currentUserStream(),
@@ -35,17 +39,21 @@ class BlockedUsersScreen extends StatelessWidget {
           final blockedUsers = List<String>.from(data['blockedUsers'] ?? []);
 
           if (blockedUsers.isEmpty) {
-            return const Center(
-              child: Text('You have not blocked anyone.', style: TextStyle(color: Colors.grey)),
+            return Center(
+              child: Text(
+                'You have not blocked anyone.',
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+              ),
             );
           }
 
           // Fetch details for all blocked users
           return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            future: FirebaseFirestore.instance
-                .collection('users')
-                .where(FieldPath.documentId, whereIn: blockedUsers)
-                .get(),
+            future:
+                FirebaseFirestore.instance
+                    .collection('users')
+                    .where(FieldPath.documentId, whereIn: blockedUsers)
+                    .get(),
             builder: (context, usersSnapshot) {
               if (!usersSnapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -58,11 +66,18 @@ class BlockedUsersScreen extends StatelessWidget {
                 itemBuilder: (context, index) {
                   final doc = docs[index];
                   final userData = doc.data();
-                  final displayName = (userData['displayName'] as String?)?.trim() ?? 'User';
+                  final displayName =
+                      (userData['displayName'] as String?)?.trim() ?? 'User';
 
                   return ListTile(
-                    title: Text(displayName, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Blocked'),
+                    title: Text(
+                      displayName,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      'Blocked',
+                      style: TextStyle(color: colorScheme.onSurfaceVariant),
+                    ),
                     trailing: TextButton(
                       onPressed: () async {
                         try {
@@ -80,7 +95,10 @@ class BlockedUsersScreen extends StatelessWidget {
                           }
                         }
                       },
-                      child: const Text('Unblock', style: TextStyle(color: Colors.blueAccent)),
+                      child: const Text(
+                        'Unblock',
+                        style: TextStyle(color: Colors.blueAccent),
+                      ),
                     ),
                   );
                 },

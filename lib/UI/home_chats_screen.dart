@@ -9,7 +9,6 @@ import 'package:first_app/UI/create_group_screen.dart';
 import 'package:first_app/UI/notification_settings_screen.dart';
 import 'package:first_app/UI/profile_settings_screen.dart';
 import 'package:first_app/UI/view_story_screen.dart';
-//import 'package:first_app/services/auth_verification_prefs.dart';
 import 'package:first_app/services/chat_repository.dart';
 import 'package:first_app/services/notification_repository.dart';
 import 'package:first_app/services/story_repository.dart';
@@ -73,6 +72,14 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
     ).push(MaterialPageRoute(builder: (_) => const ProfileSettingsScreen()));
     // Refresh photo in case user changed it
     _fetchCurrentPhotoUrl();
+  }
+
+  /// Extracts the last-activity timestamp from a chat/group document.
+  /// Both direct chats and group chats use `updatedAt`, bumped on new
+  /// messages, membership changes, and chat creation.
+  DateTime _lastActivity(Map<String, dynamic> data) {
+    final ts = data['updatedAt'] as Timestamp?;
+    return ts?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   @override
@@ -141,7 +148,10 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                color:
+                    Theme.of(context).brightness == Brightness.light
+                        ? Colors.grey.shade200
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(24),
               ),
               child: TextField(
@@ -151,7 +161,14 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
                 },
                 decoration: const InputDecoration(
                   hintText: 'Search',
+                  filled: false,
                   border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  errorBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  isCollapsed: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 14),
                   icon: Icon(Icons.search),
                 ),
               ),
@@ -195,106 +212,187 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
 
                         if (_searchQuery.isNotEmpty) {
                           return StreamBuilder<
-                            QuerySnapshot<Map<String, dynamic>>
+                            List<QueryDocumentSnapshot<Map<String, dynamic>>>
                           >(
-                            stream: repo.usersExceptSelf(),
-                            builder: (context, userSnapshot) {
-                              if (!userSnapshot.hasData) {
-                                return const AppLoadingScreen(
-                                  message: 'Searching users...',
-                                );
-                              }
-                              final docs =
-                                  userSnapshot.data!.docs.where((d) {
-                                    if (d.id == self?.uid) return false;
-                                    if (blockedUsers.contains(d.id)) {
-                                      return false;
-                                    }
-                                    final data = d.data();
-                                    final displayName =
-                                        (data['displayName'] as String?)
-                                            ?.toLowerCase() ??
-                                        '';
-                                    final email =
-                                        (data['email'] as String?)
-                                            ?.toLowerCase() ??
-                                        '';
-                                    return displayName.contains(_searchQuery) ||
-                                        email.contains(_searchQuery);
+                            stream: repo.groupChatsStream(),
+                            builder: (context, groupSearchSnapshot) {
+                              final matchingGroups =
+                                  (groupSearchSnapshot.data ?? []).where((g) {
+                                    final name =
+                                        (g.data()['groupName'] as String? ?? '')
+                                            .toLowerCase();
+                                    return name.contains(_searchQuery);
                                   }).toList();
 
-                              if (docs.isEmpty) {
-                                return const Center(
-                                  child: Text('No users found.'),
-                                );
-                              }
-
-                              return ListView.builder(
-                                itemCount: docs.length,
-                                itemBuilder: (context, index) {
-                                  final doc = docs[index];
-                                  final data = doc.data();
-                                  final displayName =
-                                      (data['displayName'] as String?)?.trim();
-                                  final title =
-                                      (displayName != null &&
-                                              displayName.isNotEmpty)
-                                          ? displayName
-                                          : 'User';
-                                  final photoUrl = data['photoUrl'] as String?;
-                                  final hasStory = storyMap.containsKey(doc.id);
-                                  final userStories = storyMap[doc.id] ?? [];
-                                  bool hasUnviewedStory = false;
-                                  if (hasStory) {
-                                    final uid =
-                                        FirebaseAuth.instance.currentUser?.uid;
-                                    if (uid != null) {
-                                      for (var s in userStories) {
-                                        final viewers = List<String>.from(
-                                          s.data()['viewers'] ?? [],
-                                        );
-                                        if (!viewers.contains(uid)) {
-                                          hasUnviewedStory = true;
-                                          break;
-                                        }
-                                      }
-                                    }
+                              return StreamBuilder<
+                                QuerySnapshot<Map<String, dynamic>>
+                              >(
+                                stream: repo.usersExceptSelf(),
+                                builder: (context, userSnapshot) {
+                                  if (!userSnapshot.hasData) {
+                                    return const AppLoadingScreen(
+                                      message: 'Searching...',
+                                    );
                                   }
 
-                                  final chatId =
-                                      self != null
-                                          ? repo.chatIdForParticipants(
-                                            self.uid,
-                                            doc.id,
-                                          )
-                                          : doc.id;
+                                  final matchingUsers =
+                                      userSnapshot.data!.docs.where((d) {
+                                        if (d.id == self?.uid) return false;
+                                        if (blockedUsers.contains(d.id)) {
+                                          return false;
+                                        }
+                                        final data = d.data();
+                                        final displayName =
+                                            (data['displayName'] as String?)
+                                                ?.toLowerCase() ??
+                                            '';
+                                        final email =
+                                            (data['email'] as String?)
+                                                ?.toLowerCase() ??
+                                            '';
+                                        return displayName.contains(
+                                              _searchQuery,
+                                            ) ||
+                                            email.contains(_searchQuery);
+                                      }).toList();
 
-                                  return _UserListTile(
-                                    userId: doc.id,
-                                    data: data,
-                                    title: title,
-                                    photoUrl: photoUrl,
-                                    hasStory: hasStory,
-                                    hasUnviewedStory: hasUnviewedStory,
-                                    userStories: userStories,
-                                    subtitle: data['email'] as String? ?? '',
-                                    chatId: chatId,
-                                    notifRepo: _notifRepo,
-                                    notifSettings: notifSettings,
-                                    onTap: () {
-                                      if (self == null) return;
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute<void>(
-                                          builder:
-                                              (_) => ChatRoomScreen(
-                                                chatId: chatId,
-                                                otherUserId: doc.id,
-                                                title: title,
-                                                otherUserPhotoUrl: photoUrl,
+                                  if (matchingGroups.isEmpty &&
+                                      matchingUsers.isEmpty) {
+                                    return const Center(
+                                      child: Text('No results found.'),
+                                    );
+                                  }
+
+                                  return ListView(
+                                    children: [
+                                      ...matchingGroups.map((g) {
+                                        final data = g.data();
+                                        final title =
+                                            data['groupName'] as String? ??
+                                            'Group';
+                                        return ListTile(
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                horizontal: 16,
+                                                vertical: 4,
                                               ),
-                                        ),
-                                      );
-                                    },
+                                          leading: const CircleAvatar(
+                                            radius: 26,
+                                            backgroundColor: Colors.blueAccent,
+                                            child: Icon(
+                                              Icons.group,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          title: Text(
+                                            title,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          subtitle: Text(
+                                            data['lastMessage'] as String? ??
+                                                'Tap to chat',
+                                            style: TextStyle(
+                                              color:
+                                                  Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          onTap: () {
+                                            Navigator.of(context).push(
+                                              MaterialPageRoute<void>(
+                                                builder:
+                                                    (_) => ChatRoomScreen(
+                                                      chatId: g.id,
+                                                      otherUserId: '',
+                                                      title: title,
+                                                      otherUserPhotoUrl: null,
+                                                    ),
+                                              ),
+                                            );
+                                          },
+                                        );
+                                      }),
+                                      ...matchingUsers.map((doc) {
+                                        final data = doc.data();
+                                        final displayName =
+                                            (data['displayName'] as String?)
+                                                ?.trim();
+                                        final title =
+                                            (displayName != null &&
+                                                    displayName.isNotEmpty)
+                                                ? displayName
+                                                : 'User';
+                                        final photoUrl =
+                                            data['photoUrl'] as String?;
+                                        final hasStory = storyMap.containsKey(
+                                          doc.id,
+                                        );
+                                        final userStories =
+                                            storyMap[doc.id] ?? [];
+                                        bool hasUnviewedStory = false;
+                                        if (hasStory) {
+                                          final uid =
+                                              FirebaseAuth
+                                                  .instance
+                                                  .currentUser
+                                                  ?.uid;
+                                          if (uid != null) {
+                                            for (var s in userStories) {
+                                              final viewers = List<String>.from(
+                                                s.data()['viewers'] ?? [],
+                                              );
+                                              if (!viewers.contains(uid)) {
+                                                hasUnviewedStory = true;
+                                                break;
+                                              }
+                                            }
+                                          }
+                                        }
+
+                                        final chatId =
+                                            self != null
+                                                ? repo.chatIdForParticipants(
+                                                  self.uid,
+                                                  doc.id,
+                                                )
+                                                : doc.id;
+
+                                        return _UserListTile(
+                                          userId: doc.id,
+                                          data: data,
+                                          title: title,
+                                          photoUrl: photoUrl,
+                                          hasStory: hasStory,
+                                          hasUnviewedStory: hasUnviewedStory,
+                                          userStories: userStories,
+                                          subtitle:
+                                              data['email'] as String? ?? '',
+                                          chatId: chatId,
+                                          notifRepo: _notifRepo,
+                                          notifSettings: notifSettings,
+                                          onTap: () {
+                                            if (self == null) return;
+                                            Navigator.of(context).push(
+                                              MaterialPageRoute<void>(
+                                                builder:
+                                                    (_) => ChatRoomScreen(
+                                                      chatId: chatId,
+                                                      otherUserId: doc.id,
+                                                      title: title,
+                                                      otherUserPhotoUrl:
+                                                          photoUrl,
+                                                    ),
+                                              ),
+                                            );
+                                          },
+                                        );
+                                      }),
+                                    ],
                                   );
                                 },
                               );
@@ -360,204 +458,187 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
                                   builder: (context, usersSnapshot) {
                                     final usersMap = usersSnapshot.data ?? {};
 
+                                    // Merge groups + direct chats into one
+                                    // list sorted by last activity, instead
+                                    // of two separate sectioned lists.
+                                    final entries =
+                                        <MapEntry<DateTime, Widget>>[];
+
+                                    for (final g in groups) {
+                                      final data = g.data();
+                                      final title =
+                                          data['groupName'] as String? ??
+                                          'Group';
+                                      entries.add(
+                                        MapEntry(
+                                          _lastActivity(data),
+                                          ListTile(
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                  horizontal: 16,
+                                                  vertical: 4,
+                                                ),
+                                            leading: const CircleAvatar(
+                                              radius: 28,
+                                              backgroundColor:
+                                                  Colors.blueAccent,
+                                              child: Icon(
+                                                Icons.group,
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            title: Text(
+                                              title,
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 16,
+                                              ),
+                                            ),
+                                            subtitle: Text(
+                                              data['lastMessage'] as String? ??
+                                                  'Tap to chat',
+                                              style: TextStyle(
+                                                color:
+                                                    Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                            onTap: () {
+                                              Navigator.of(context).push(
+                                                MaterialPageRoute<void>(
+                                                  builder:
+                                                      (_) => ChatRoomScreen(
+                                                        chatId: g.id,
+                                                        otherUserId: '',
+                                                        title: title,
+                                                        otherUserPhotoUrl: null,
+                                                      ),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      );
+                                    }
+
+                                    for (final chatDoc in directChats) {
+                                      final chatData = chatDoc.data();
+                                      final participants = List<String>.from(
+                                        chatData['participants'] ?? [],
+                                      );
+                                      participants.remove(self?.uid);
+                                      final otherUserId =
+                                          participants.isNotEmpty
+                                              ? participants.first
+                                              : '';
+
+                                      if (otherUserId.isEmpty ||
+                                          blockedUsers.contains(otherUserId)) {
+                                        continue;
+                                      }
+
+                                      // FIX: Use pre-fetched user data
+                                      // — no more per-item FutureBuilder
+                                      final userData = usersMap[otherUserId];
+                                      if (userData == null) continue;
+
+                                      final displayName =
+                                          (userData['displayName'] as String?)
+                                              ?.trim();
+                                      final title =
+                                          (displayName != null &&
+                                                  displayName.isNotEmpty)
+                                              ? displayName
+                                              : 'User';
+                                      final photoUrl =
+                                          userData['photoUrl'] as String?;
+                                      final lastMessage =
+                                          chatData['lastMessage'] as String? ??
+                                          'Tap to chat';
+
+                                      final hasStory = storyMap.containsKey(
+                                        otherUserId,
+                                      );
+                                      final userStories =
+                                          storyMap[otherUserId] ?? [];
+                                      bool hasUnviewedStory = false;
+                                      if (hasStory) {
+                                        final uid =
+                                            FirebaseAuth
+                                                .instance
+                                                .currentUser
+                                                ?.uid;
+                                        if (uid != null) {
+                                          for (var s in userStories) {
+                                            final viewers = List<String>.from(
+                                              s.data()['viewers'] ?? [],
+                                            );
+                                            if (!viewers.contains(uid)) {
+                                              hasUnviewedStory = true;
+                                              break;
+                                            }
+                                          }
+                                        }
+                                      }
+
+                                      entries.add(
+                                        MapEntry(
+                                          _lastActivity(chatData),
+                                          _UserListTile(
+                                            userId: otherUserId,
+                                            data: userData,
+                                            title: title,
+                                            photoUrl: photoUrl,
+                                            hasStory: hasStory,
+                                            hasUnviewedStory: hasUnviewedStory,
+                                            userStories: userStories,
+                                            subtitle: lastMessage,
+                                            chatId: chatDoc.id,
+                                            notifRepo: _notifRepo,
+                                            notifSettings: notifSettings,
+                                            onTap: () {
+                                              if (self == null) return;
+                                              Navigator.of(context).push(
+                                                MaterialPageRoute<void>(
+                                                  builder:
+                                                      (_) => ChatRoomScreen(
+                                                        chatId: chatDoc.id,
+                                                        otherUserId:
+                                                            otherUserId,
+                                                        title: title,
+                                                        otherUserPhotoUrl:
+                                                            photoUrl,
+                                                      ),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      );
+                                    }
+
+                                    if (entries.isEmpty) {
+                                      return const Center(
+                                        child: Padding(
+                                          padding: EdgeInsets.all(32.0),
+                                          child: Text(
+                                            'No chats yet.\nUse the search bar above to find people and start chatting!',
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                      );
+                                    }
+
+                                    // Most recent activity first.
+                                    entries.sort(
+                                      (a, b) => b.key.compareTo(a.key),
+                                    );
+
                                     return ListView(
-                                      children: [
-                                        if (groups.isNotEmpty) ...[
-                                          const Padding(
-                                            padding: EdgeInsets.symmetric(
-                                              horizontal: 16.0,
-                                              vertical: 8.0,
-                                            ),
-                                            child: Text(
-                                              'Your Groups',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                          ...groups.map((g) {
-                                            final data = g.data();
-                                            final title =
-                                                data['groupName'] as String? ??
-                                                'Group';
-                                            return ListTile(
-                                              contentPadding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 16,
-                                                    vertical: 4,
-                                                  ),
-                                              leading: const CircleAvatar(
-                                                radius: 28,
-                                                backgroundColor:
-                                                    Colors.blueAccent,
-                                                child: Icon(
-                                                  Icons.group,
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                              title: Text(
-                                                title,
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: 16,
-                                                ),
-                                              ),
-                                              subtitle: Text(
-                                                data['lastMessage']
-                                                        as String? ??
-                                                    'Tap to chat',
-                                                style: TextStyle(
-                                                  color:
-                                                      Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant,
-                                                  fontSize: 14,
-                                                ),
-                                              ),
-                                              onTap: () {
-                                                Navigator.of(context).push(
-                                                  MaterialPageRoute<void>(
-                                                    builder:
-                                                        (_) => ChatRoomScreen(
-                                                          chatId: g.id,
-                                                          otherUserId: '',
-                                                          title: title,
-                                                          otherUserPhotoUrl:
-                                                              null,
-                                                        ),
-                                                  ),
-                                                );
-                                              },
-                                            );
-                                          }),
-                                        ],
-                                        if (directChats.isNotEmpty) ...[
-                                          const Padding(
-                                            padding: EdgeInsets.symmetric(
-                                              horizontal: 16.0,
-                                              vertical: 8.0,
-                                            ),
-                                            child: Text(
-                                              'Direct Messages',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.grey,
-                                              ),
-                                            ),
-                                          ),
-                                          ...directChats.map((chatDoc) {
-                                            final chatData = chatDoc.data();
-                                            final participants =
-                                                List<String>.from(
-                                                  chatData['participants'] ??
-                                                      [],
-                                                );
-                                            participants.remove(self?.uid);
-                                            final otherUserId =
-                                                participants.isNotEmpty
-                                                    ? participants.first
-                                                    : '';
-
-                                            if (otherUserId.isEmpty ||
-                                                blockedUsers.contains(
-                                                  otherUserId,
-                                                )) {
-                                              return const SizedBox.shrink();
-                                            }
-
-                                            // FIX: Use pre-fetched user data
-                                            // — no more per-item FutureBuilder
-                                            final userData =
-                                                usersMap[otherUserId];
-                                            if (userData == null) {
-                                              return const SizedBox.shrink();
-                                            }
-
-                                            final displayName =
-                                                (userData['displayName']
-                                                        as String?)
-                                                    ?.trim();
-                                            final title =
-                                                (displayName != null &&
-                                                        displayName.isNotEmpty)
-                                                    ? displayName
-                                                    : 'User';
-                                            final photoUrl =
-                                                userData['photoUrl'] as String?;
-                                            final lastMessage =
-                                                chatData['lastMessage']
-                                                    as String? ??
-                                                'Tap to chat';
-
-                                            final hasStory = storyMap
-                                                .containsKey(otherUserId);
-                                            final userStories =
-                                                storyMap[otherUserId] ?? [];
-                                            bool hasUnviewedStory = false;
-                                            if (hasStory) {
-                                              final uid =
-                                                  FirebaseAuth
-                                                      .instance
-                                                      .currentUser
-                                                      ?.uid;
-                                              if (uid != null) {
-                                                for (var s in userStories) {
-                                                  final viewers =
-                                                      List<String>.from(
-                                                        s.data()['viewers'] ??
-                                                            [],
-                                                      );
-                                                  if (!viewers.contains(uid)) {
-                                                    hasUnviewedStory = true;
-                                                    break;
-                                                  }
-                                                }
-                                              }
-                                            }
-
-                                            return _UserListTile(
-                                              userId: otherUserId,
-                                              data: userData,
-                                              title: title,
-                                              photoUrl: photoUrl,
-                                              hasStory: hasStory,
-                                              hasUnviewedStory:
-                                                  hasUnviewedStory,
-                                              userStories: userStories,
-                                              subtitle: lastMessage,
-                                              chatId: chatDoc.id,
-                                              notifRepo: _notifRepo,
-                                              notifSettings: notifSettings,
-                                              onTap: () {
-                                                if (self == null) return;
-                                                Navigator.of(context).push(
-                                                  MaterialPageRoute<void>(
-                                                    builder:
-                                                        (_) => ChatRoomScreen(
-                                                          chatId: chatDoc.id,
-                                                          otherUserId:
-                                                              otherUserId,
-                                                          title: title,
-                                                          otherUserPhotoUrl:
-                                                              photoUrl,
-                                                        ),
-                                                  ),
-                                                );
-                                              },
-                                            );
-                                          }),
-                                        ] else if (groups.isEmpty) ...[
-                                          const Center(
-                                            child: Padding(
-                                              padding: EdgeInsets.all(32.0),
-                                              child: Text(
-                                                'No chats yet.\nUse the search bar above to find people and start chatting!',
-                                                textAlign: TextAlign.center,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ],
+                                      children:
+                                          entries.map((e) => e.value).toList(),
                                     );
                                   },
                                 );

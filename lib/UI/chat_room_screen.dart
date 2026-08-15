@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import '../UI/photo_viewer_screen.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   const ChatRoomScreen({
@@ -640,7 +641,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (type == 'image' && base64Data != null) {
       final imgProvider = _getImageProvider(base64Data);
       if (imgProvider != null) {
-        return Image(image: imgProvider, width: 200, fit: BoxFit.contain);
+        return GestureDetector(
+          onTap:
+              () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder:
+                      (_) => PhotoViewerScreen(
+                        images: [base64Data],
+                        canDownload: true,
+                      ),
+                ),
+              ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image(image: imgProvider, width: 200, fit: BoxFit.contain),
+          ),
+        );
       }
       return const Icon(Icons.broken_image, size: 50);
     } else if (type == 'audio' && base64Data != null) {

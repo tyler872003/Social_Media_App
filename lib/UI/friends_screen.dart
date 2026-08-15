@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:first_app/services/friends_repository.dart';
 import 'package:first_app/UI/user_profile_screen.dart';
@@ -15,11 +17,52 @@ class _FriendsScreenState extends State<FriendsScreen> {
   final _friendsRepo = FriendsRepository();
   final _searchController = TextEditingController();
   String _searchQuery = '';
+  List<String> _myFriends = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMyFriends();
+  }
+
+  Future<void> _loadMyFriends() async {
+    final friends = await _friendsRepo.getFriendsList();
+    if (mounted) setState(() => _myFriends = friends);
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Widget _buildAvatar(String? photoUrl, double radius) {
+    if (photoUrl != null && photoUrl.isNotEmpty) {
+      if (photoUrl.startsWith('data:image')) {
+        try {
+          return CircleAvatar(
+            radius: radius,
+            backgroundImage: MemoryImage(
+              base64Decode(photoUrl.split(',').last),
+            ),
+          );
+        } catch (_) {}
+      } else {
+        return CircleAvatar(
+          radius: radius,
+          backgroundImage: NetworkImage(photoUrl),
+        );
+      }
+    }
+    return CircleAvatar(
+      radius: radius,
+      child: Icon(Icons.person, size: radius),
+    );
+  }
+
+  int _mutualFriendsCount(Map<String, dynamic> otherUserData) {
+    final theirFriends = List<String>.from(otherUserData['friends'] ?? []);
+    return theirFriends.where((f) => _myFriends.contains(f)).length;
   }
 
   @override
@@ -112,10 +155,9 @@ class _FriendsScreenState extends State<FriendsScreen> {
                           final data =
                               docs[index].data() as Map<String, dynamic>;
                           final uid = docs[index].id;
+                          final photoUrl = data['photoUrl'] as String?;
                           return ListTile(
-                            leading: CircleAvatar(
-                              child: const Icon(Icons.person),
-                            ),
+                            leading: _buildAvatar(photoUrl, 20),
                             title: Text(data['displayName'] ?? 'User'),
                             subtitle: Text(data['email'] ?? ''),
                             onTap: () {
@@ -127,17 +169,6 @@ class _FriendsScreenState extends State<FriendsScreen> {
                                 ),
                               );
                             },
-                            trailing: IconButton(
-                              icon: const Icon(Icons.person_add),
-                              onPressed: () {
-                                _friendsRepo.sendFriendRequest(uid);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Friend request sent'),
-                                  ),
-                                );
-                              },
-                            ),
                           );
                         },
                       );
@@ -181,9 +212,17 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 }
                 final data =
                     userSnap.data!.data() as Map<String, dynamic>? ?? {};
+                final photoUrl = data['photoUrl'] as String?;
+                final mutualCount = _mutualFriendsCount(data);
+
                 return ListTile(
-                  leading: CircleAvatar(child: const Icon(Icons.person)),
+                  leading: _buildAvatar(photoUrl, 22),
                   title: Text(data['displayName'] ?? 'User'),
+                  subtitle: Text(
+                    mutualCount > 0
+                        ? '$mutualCount mutual friend${mutualCount == 1 ? '' : 's'}'
+                        : 'No mutual friends',
+                  ),
                   onTap: () {
                     Navigator.push(
                       context,
@@ -200,10 +239,12 @@ class _FriendsScreenState extends State<FriendsScreen> {
                         onPressed: () async {
                           try {
                             await _friendsRepo.acceptFriendRequest(requestUid);
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Friend accepted!')),
                             );
                           } catch (e) {
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text('Error: $e')),
                             );
@@ -215,12 +256,14 @@ class _FriendsScreenState extends State<FriendsScreen> {
                         onPressed: () async {
                           try {
                             await _friendsRepo.declineFriendRequest(requestUid);
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('Request declined.'),
                               ),
                             );
                           } catch (e) {
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(content: Text('Error: $e')),
                             );
@@ -270,8 +313,9 @@ class _FriendsScreenState extends State<FriendsScreen> {
                 }
                 final userData =
                     userSnap.data!.data() as Map<String, dynamic>? ?? {};
+                final photoUrl = userData['photoUrl'] as String?;
                 return ListTile(
-                  leading: CircleAvatar(child: const Icon(Icons.person)),
+                  leading: _buildAvatar(photoUrl, 20),
                   title: Text(userData['displayName'] ?? 'User'),
                   onTap: () {
                     Navigator.push(
