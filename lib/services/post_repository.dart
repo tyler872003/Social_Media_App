@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
+import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'notification_feed_repository.dart';
 
 class PostRepository {
@@ -59,7 +60,7 @@ class PostRepository {
         privacy: privacy,
         closedFriendsIds: closedFriendsIds,
         thumbnail: base64Images.isNotEmpty ? base64Images.first : null,
-      ),
+      ).catchError((e) => debugPrint('❌ notifyNewPost failed: $e')),
     );
   }
 
@@ -70,18 +71,29 @@ class PostRepository {
     required List<String> closedFriendsIds,
     String? thumbnail,
   }) async {
-    if (privacy == 'private') return;
+    if (privacy == 'private') {
+      debugPrint('🔕 notifyNewPost skipped: privacy is private');
+      return;
+    }
 
     final userDoc = await _firestore.collection('users').doc(uid).get();
     final friends = List<String>.from(userDoc.data()?['friends'] ?? []);
-    if (friends.isEmpty) return;
+    debugPrint('👥 poster friends list: $friends');
+    if (friends.isEmpty) {
+      debugPrint('🔕 notifyNewPost skipped: friends list is empty');
+      return;
+    }
 
     final recipients =
         privacy == 'closedFriends'
             ? friends.where(closedFriendsIds.contains).toList()
-            : friends; // 'public' or 'friends' — every friend can see it
+            : friends;
+    debugPrint('📬 notifyNewPost recipients: $recipients');
 
-    if (recipients.isEmpty) return;
+    if (recipients.isEmpty) {
+      debugPrint('🔕 notifyNewPost skipped: no recipients after filtering');
+      return;
+    }
 
     await NotificationFeedRepository().notifyNewPost(
       friendIds: recipients,
@@ -89,6 +101,7 @@ class PostRepository {
       postId: postId,
       thumbnail: thumbnail,
     );
+    debugPrint('✅ notifyNewPost wrote to ${recipients.length} recipient(s)');
   }
 
   Future<void> updatePostDownloadPermission(String postId, bool allow) async {

@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:first_app/services/app_theme_service.dart';
 import 'package:first_app/services/chat_repository.dart';
 import 'package:first_app/widgets/app_loading.dart';
+import 'package:first_app/UI/notification_settings_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -17,7 +18,7 @@ class ProfileSettingsScreen extends StatefulWidget {
 }
 
 class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
-  final _repo = ChatRepository();
+  //final _repo = ChatRepository();
   String? _photoUrl;
   final bool _busy = false;
 
@@ -343,7 +344,15 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                   _buildTile(
                     icon: Icons.notifications_none_outlined,
                     title: 'Notifications',
-                    onTap: () => _showSnack('Notifications clicked'),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder:
+                              (context) => const NotificationSettingsScreen(),
+                        ),
+                      );
+                    },
                   ),
                   _buildTile(
                     icon: Icons.lock_outline,

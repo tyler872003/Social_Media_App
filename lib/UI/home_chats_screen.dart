@@ -6,7 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:first_app/UI/blocked_users_screen.dart';
 import 'package:first_app/UI/chat_room_screen.dart';
 import 'package:first_app/UI/create_group_screen.dart';
-import 'package:first_app/UI/notification_settings_screen.dart';
+import 'package:first_app/UI/notifications_screen.dart';
 import 'package:first_app/UI/profile_settings_screen.dart';
 import 'package:first_app/UI/view_story_screen.dart';
 import 'package:first_app/services/chat_repository.dart';
@@ -118,12 +118,10 @@ class _HomeChatsScreenState extends State<HomeChatsScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
-            tooltip: 'Notification Settings',
+            tooltip: 'Notifications',
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const NotificationSettingsScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
               );
             },
           ),
