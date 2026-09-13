@@ -345,6 +345,22 @@ class _LoginScreenState extends State<LoginScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const SizedBox(height: 32),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: Image.asset(
+                              'assets/logo.jpg',
+                              width: 90,
+                              height: 90,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Icon(
+                                  Icons.image_not_supported_outlined,
+                                  size: 60,
+                                  color: colorScheme.onSurfaceVariant,
+                                );
+                              },
+                            ),
+                          ),
                           // VibeStream Gradient Logo Text
                           ShaderMask(
                             shaderCallback:

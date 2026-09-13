@@ -81,6 +81,10 @@ class ChatRepository {
         cur.providerData.any((p) => p.providerId == 'password')) {
       return;
     }
+
+    final docRef = _db.collection('users').doc(uid);
+    final existing = await docRef.get();
+
     final data = <String, dynamic>{
       'email': email,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -89,7 +93,18 @@ class ChatRepository {
     if (displayName != null && displayName.trim().isNotEmpty) {
       data['displayName'] = displayName.trim();
     }
-    return _db.collection('users').doc(uid).set(data, SetOptions(merge: true));
+    if (!existing.exists) {
+      data['createdAt'] = FieldValue.serverTimestamp();
+      // FIX: every new user doc now gets an explicit status on creation,
+      // so the admin console's "Active" filter (which queries
+      // status == 'active' server-side) actually finds them. Only set on
+      // first creation — never overwrite an existing doc's status here, or
+      // a returning user who was flagged/suspended by an admin would get
+      // silently reset back to 'active' on their next login.
+      data['status'] = 'active';
+    }
+
+    return docRef.set(data, SetOptions(merge: true));
   }
 
   Future<void> syncCurrentUserProfileDocument() async {
@@ -164,9 +179,8 @@ class ChatRepository {
     final newRef = _db.collection('nicknames').doc(newKey);
 
     // Find current nickname key to release
-    final oldKey = user.displayName != null
-        ? nicknameDocKey(user.displayName!)
-        : null;
+    final oldKey =
+        user.displayName != null ? nicknameDocKey(user.displayName!) : null;
     final oldRef =
         oldKey != null ? _db.collection('nicknames').doc(oldKey) : null;
 
@@ -277,7 +291,8 @@ class ChatRepository {
       lastMsg = trimmed == 'video' ? '📹 Video call' : '📞 Voice call';
     }
     if (messageType == 'call_ended') {
-      lastMsg = trimmed == 'video' ? '📹 Video call ended' : '📞 Voice call ended';
+      lastMsg =
+          trimmed == 'video' ? '📹 Video call ended' : '📞 Voice call ended';
     }
     if (messageType == 'call_event') lastMsg = trimmed;
 

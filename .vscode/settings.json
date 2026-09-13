@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "C:/Users/acer/Desktop/Flutter/first_app/linux"
+    "cmake.sourceDirectory": "C:/Users/acer/Desktop/Flutter/first_app/linux",
+    "cmake.ignoreCMakeListsMissing": true
 }

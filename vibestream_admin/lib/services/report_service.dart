@@ -43,14 +43,13 @@ class ReportService {
       throw Exception('You need to be signed in to report a post.');
     }
 
-    final existing =
-        await _db
-            .collection('reports')
-            .where('postId', isEqualTo: postId)
-            .where('reporterId', isEqualTo: user.uid)
-            .where('status', isEqualTo: 'pending')
-            .limit(1)
-            .get();
+    final existing = await _db
+        .collection('reports')
+        .where('postId', isEqualTo: postId)
+        .where('reporterId', isEqualTo: user.uid)
+        .where('status', isEqualTo: 'pending')
+        .limit(1)
+        .get();
 
     if (existing.docs.isNotEmpty) {
       throw Exception('You\'ve already reported this post.');
@@ -77,8 +76,10 @@ class ReportService {
   // this chunks into batches of 30 and merges the results.
 
   Future<List<String>> _postIdsForUser(String uid) async {
-    final snap =
-        await _db.collection('posts').where('userId', isEqualTo: uid).get();
+    final snap = await _db
+        .collection('posts')
+        .where('userId', isEqualTo: uid)
+        .get();
     return snap.docs.map((d) => d.id).toList();
   }
 
@@ -101,22 +102,22 @@ class ReportService {
       return const ReportCounts(total: 0, last30Days: 0);
     }
 
-    final cutoffMillis =
-        DateTime.now()
-            .subtract(const Duration(days: 30))
-            .millisecondsSinceEpoch;
+    final cutoffMillis = DateTime.now()
+        .subtract(const Duration(days: 30))
+        .millisecondsSinceEpoch;
 
     var total = 0;
     var last30Days = 0;
     for (final chunk in _chunk(postIds, 30)) {
-      final snap =
-          await _db.collection('reports').where('postId', whereIn: chunk).get();
+      final snap = await _db
+          .collection('reports')
+          .where('postId', whereIn: chunk)
+          .get();
       total += snap.docs.length;
-      last30Days +=
-          snap.docs.where((d) {
-            final createdAt = d.data()['createdAt'];
-            return createdAt is int && createdAt >= cutoffMillis;
-          }).length;
+      last30Days += snap.docs.where((d) {
+        final createdAt = d.data()['createdAt'];
+        return createdAt is int && createdAt >= cutoffMillis;
+      }).length;
     }
     return ReportCounts(total: total, last30Days: last30Days);
   }
