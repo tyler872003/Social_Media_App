@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'package:first_app/models/media_item.dart';
 // TODO: fix this import path to match where post_repository.dart actually
 // lives in your project.
 import 'package:first_app/services/post_repository.dart';
@@ -61,12 +62,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   padding: const EdgeInsets.only(bottom: 12),
                   children: [
                     _PostHeader(userId: post['userId'] as String? ?? ''),
-                    if ((post['base64Data'] as String? ?? '').isNotEmpty)
-                      Image.memory(
-                        base64Decode(post['base64Data']),
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                      ),
+                    _PostMedia(
+                      mediaList: post['media'] as List<dynamic>? ?? [],
+                    ),
                     if ((post['caption'] as String? ?? '').isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.all(16),
@@ -155,6 +153,73 @@ class _PostHeader extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Renders the post's `media` list (Cloudinary-backed `MediaItem`s).
+/// A single item fills a large tile; multiple items scroll horizontally.
+/// Video items show their Cloudinary-generated thumbnail with a play
+/// glyph overlay — wire up actual playback separately if you want it.
+class _PostMedia extends StatelessWidget {
+  const _PostMedia({required this.mediaList});
+  final List<dynamic> mediaList;
+
+  @override
+  Widget build(BuildContext context) {
+    final items =
+        mediaList
+            .whereType<Map<String, dynamic>>()
+            .map(MediaItem.fromMap)
+            .toList();
+
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    if (items.length == 1) {
+      return _MediaTile(item: items.first, height: 320);
+    }
+
+    return SizedBox(
+      height: 220,
+      child: PageView.builder(
+        itemCount: items.length,
+        itemBuilder:
+            (context, index) => _MediaTile(item: items[index], height: 220),
+      ),
+    );
+  }
+}
+
+class _MediaTile extends StatelessWidget {
+  const _MediaTile({required this.item, required this.height});
+  final MediaItem item;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl =
+        item.type == MediaType.video ? item.thumbnailUrl : item.url;
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        if (imageUrl != null)
+          Image.network(
+            imageUrl,
+            width: double.infinity,
+            height: height,
+            fit: BoxFit.cover,
+          ),
+        if (item.type == MediaType.video)
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: const BoxDecoration(
+              color: Colors.black45,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.play_arrow, color: Colors.white, size: 32),
+          ),
+      ],
     );
   }
 }

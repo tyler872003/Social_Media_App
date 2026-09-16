@@ -607,8 +607,27 @@ class _NewsfeedScreenState extends State<NewsfeedScreen> {
     final userId = post['userId'] as String;
     final isOwner = userId == uid;
     final caption = post['caption'] as String? ?? '';
+
     final images = PostMediaUtils.getImages(post);
-    final isStatus = images.isEmpty;
+
+    // Get ALL new Cloudinary media.
+    final rawMedia = post['media'];
+
+    final List<Map<String, dynamic>> mediaList =
+        rawMedia is List
+            ? rawMedia
+                .whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .toList()
+            : <Map<String, dynamic>>[];
+
+    final hasOldImages = images.isNotEmpty;
+    final hasNewMedia = mediaList.isNotEmpty;
+
+    final hasMedia = hasOldImages || hasNewMedia;
+
+    final isStatus = !hasMedia;
+
     final likes = List<String>.from(post['likes'] ?? []);
     final reactions = Map<String, dynamic>.from(post['reactions'] ?? {});
     final myReaction = uid == null ? null : reactions[uid] as String?;
@@ -713,7 +732,9 @@ class _NewsfeedScreenState extends State<NewsfeedScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: PostMediaViewer(
                   images: images,
-                  aspectRatio: images.length > 1 ? 1.1 : 4 / 5,
+                  media: mediaList,
+                  aspectRatio:
+                      mediaList.length > 1 || images.length > 1 ? 1.1 : 4 / 5,
                   canDownload:
                       uid != null && PostMediaUtils.canUserDownload(post, uid),
                 ),

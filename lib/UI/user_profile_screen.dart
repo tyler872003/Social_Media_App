@@ -29,6 +29,7 @@ const _reactionIcons = {
 
 class UserProfileScreen extends StatefulWidget {
   const UserProfileScreen({super.key, required this.userId});
+
   final String userId;
 
   @override
@@ -38,6 +39,7 @@ class UserProfileScreen extends StatefulWidget {
 class _UserProfileScreenState extends State<UserProfileScreen> {
   final _postRepo = PostRepository();
   final _friendsRepo = FriendsRepository();
+
   List<String> _friendsList = [];
 
   bool get _isOwnProfile =>
@@ -51,7 +53,211 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Future<void> _loadFriends() async {
     final friends = await _friendsRepo.getFriendsList();
-    if (mounted) setState(() => _friendsList = friends);
+
+    if (!mounted) return;
+
+    setState(() {
+      _friendsList = friends;
+    });
+  }
+
+  // ------------------------------------------------------------
+  // CLOUDINARY MEDIA HELPERS
+  // ------------------------------------------------------------
+
+  /// Returns the new Cloudinary media list from:
+  ///
+  /// post['media'] = [
+  ///   {
+  ///     'url': 'https://...',
+  ///     'type': 'image',
+  ///     'publicId': '...',
+  ///     'thumbnailUrl': '...'
+  ///   }
+  /// ]
+  ///
+  /// Invalid/empty media entries are ignored.
+  List<Map<String, dynamic>> _getCloudinaryMedia(Map<String, dynamic> post) {
+    final rawMedia = post['media'];
+
+    if (rawMedia is! List) {
+      return [];
+    }
+
+    return rawMedia
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where((item) {
+          final url = item['url']?.toString() ?? '';
+          return url.isNotEmpty;
+        })
+        .toList();
+  }
+
+  /// Builds the small thumbnail shown in the 3-column profile grid.
+  ///
+  /// Priority:
+  /// 1. Cloudinary media
+  /// 2. Old Base64 image
+  /// 3. Status post
+  Widget _buildProfilePostThumbnail({
+    required Map<String, dynamic> post,
+    required List<String> images,
+    required List<Map<String, dynamic>> media,
+    required bool isStatus,
+  }) {
+    // ----------------------------------------------------------
+    // NEW CLOUDINARY MEDIA
+    // ----------------------------------------------------------
+
+    if (media.isNotEmpty) {
+      final firstMedia = media.first;
+
+      final type = firstMedia['type']?.toString() ?? 'image';
+      final url = firstMedia['url']?.toString() ?? '';
+
+      if (url.isEmpty) {
+        return const ColoredBox(
+          color: Colors.black12,
+          child: Center(child: Icon(Icons.broken_image)),
+        );
+      }
+
+      // VIDEO THUMBNAIL
+      if (type == 'video') {
+        final thumbnailUrl = firstMedia['thumbnailUrl']?.toString() ?? '';
+
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            if (thumbnailUrl.isNotEmpty)
+              Image.network(
+                thumbnailUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) {
+                  return Container(
+                    color: Colors.black,
+                    child: const Center(
+                      child: Icon(
+                        Icons.videocam,
+                        color: Colors.white,
+                        size: 34,
+                      ),
+                    ),
+                  );
+                },
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) {
+                    return child;
+                  }
+
+                  return Container(
+                    color: Colors.black,
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                  );
+                },
+              )
+            else
+              Container(
+                color: Colors.black,
+                child: const Center(
+                  child: Icon(Icons.videocam, color: Colors.white, size: 34),
+                ),
+              ),
+
+            // PLAY ICON
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(7),
+                decoration: const BoxDecoration(
+                  color: Colors.black54,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+
+      // CLOUDINARY IMAGE
+      return Image.network(
+        url,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        errorBuilder: (_, __, ___) {
+          return const ColoredBox(
+            color: Colors.black12,
+            child: Center(child: Icon(Icons.broken_image)),
+          );
+        },
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) {
+            return child;
+          }
+
+          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+        },
+      );
+    }
+
+    // ----------------------------------------------------------
+    // OLD BASE64 IMAGE
+    // ----------------------------------------------------------
+
+    if (images.isNotEmpty) {
+      try {
+        return Image.memory(
+          base64Decode(images.first),
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          errorBuilder: (_, __, ___) {
+            return const Center(child: Icon(Icons.broken_image));
+          },
+        );
+      } catch (_) {
+        return const Center(child: Icon(Icons.broken_image));
+      }
+    }
+
+    // ----------------------------------------------------------
+    // STATUS POST
+    // ----------------------------------------------------------
+
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF2563EB), Color(0xFF7C3AED)],
+        ),
+      ),
+      padding: const EdgeInsets.all(6),
+      child: Center(
+        child: Text(
+          (post['caption'] as String? ?? '').trim(),
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
   }
 
   String _privacyLabel(String privacy) {
@@ -61,6 +267,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         )['label']
         as String);
   }
+
+  // ------------------------------------------------------------
+  // PRIVACY
+  // ------------------------------------------------------------
 
   void _showPrivacyEditor(String postId, String currentPrivacy) {
     showModalBottomSheet<void>(
@@ -108,19 +318,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             : null,
                     onTap: () async {
                       Navigator.pop(ctx);
+
                       await _postRepo.updatePostPrivacy(
                         postId,
                         option['value'] as String,
                       );
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Privacy changed to ${option['label']}',
-                            ),
+
+                      if (!mounted) return;
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Privacy changed to ${option['label']}',
                           ),
-                        );
-                      }
+                        ),
+                      );
                     },
                   ),
                 const SizedBox(height: 8),
@@ -129,6 +341,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ),
     );
   }
+
+  // ------------------------------------------------------------
+  // DELETE POST
+  // ------------------------------------------------------------
 
   void _confirmDeletePost(String postId) {
     showDialog<void>(
@@ -145,12 +361,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
               TextButton(
                 onPressed: () async {
                   Navigator.pop(ctx);
+
                   await _postRepo.deletePost(postId);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Post deleted.')),
-                    );
-                  }
+
+                  if (!mounted) return;
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Post deleted.')),
+                  );
                 },
                 child: const Text(
                   'Delete',
@@ -161,6 +379,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           ),
     );
   }
+
+  // ------------------------------------------------------------
+  // OPEN POST DETAIL
+  // ------------------------------------------------------------
 
   void _openPostDetail(Map<String, dynamic> post) {
     showModalBottomSheet<void>(
@@ -178,12 +400,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     );
   }
 
+  // ------------------------------------------------------------
+  // FRIENDS
+  // ------------------------------------------------------------
+
   void _openFriendsList(List<String> friends) {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => FriendsListScreen(friendIds: friends)),
     );
   }
+
+  // ------------------------------------------------------------
+  // AVATAR
+  // ------------------------------------------------------------
 
   Widget _buildAvatar(String? photoUrl, double radius) {
     if (photoUrl != null && photoUrl.isNotEmpty) {
@@ -203,11 +433,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         );
       }
     }
+
     return CircleAvatar(
       radius: radius,
       child: Icon(Icons.person, size: radius),
     );
   }
+
+  // ------------------------------------------------------------
+  // BUILD
+  // ------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -222,13 +457,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             IconButton(
               tooltip: 'Settings',
               icon: const Icon(Icons.settings_outlined),
-              onPressed:
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const ProfileSettingsScreen(),
-                    ),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const ProfileSettingsScreen(),
                   ),
+                );
+              },
             ),
         ],
       ),
@@ -245,14 +481,22 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           }
 
           final userData = userSnapshot.data?.data() ?? {};
+
           final displayName = userData['displayName'] as String? ?? 'User';
+
           final photoUrl = userData['photoUrl'] as String?;
+
           final email = userData['email'] as String?;
+
           final friends = List<String>.from(userData['friends'] ?? []);
+
           final isFriend = _friendsList.contains(widget.userId);
 
           return CustomScrollView(
             slivers: [
+              // ------------------------------------------------
+              // PROFILE HEADER
+              // ------------------------------------------------
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -272,6 +516,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                               builder: (context, postSnapshot) {
                                 final postCount =
                                     postSnapshot.data?.length ?? 0;
+
                                 return Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceEvenly,
@@ -337,7 +582,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   await _friendsRepo.declineFriendRequest(
                                     widget.userId,
                                   );
-                                  if (!context.mounted) return;
+
+                                  if (!context.mounted) {
+                                    return;
+                                  }
+
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
                                       content: Text('Friend request cancelled'),
@@ -360,7 +609,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                               .acceptFriendRequest(
                                                 widget.userId,
                                               );
-                                          if (!context.mounted) return;
+
+                                          if (!context.mounted) {
+                                            return;
+                                          }
+
                                           ScaffoldMessenger.of(
                                             context,
                                           ).showSnackBar(
@@ -369,7 +622,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                             ),
                                           );
                                         } catch (e) {
-                                          if (!context.mounted) return;
+                                          if (!context.mounted) {
+                                            return;
+                                          }
+
                                           ScaffoldMessenger.of(
                                             context,
                                           ).showSnackBar(
@@ -390,7 +646,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                         await _friendsRepo.declineFriendRequest(
                                           widget.userId,
                                         );
-                                        if (!context.mounted) return;
+
+                                        if (!context.mounted) {
+                                          return;
+                                        }
+
                                         ScaffoldMessenger.of(
                                           context,
                                         ).showSnackBar(
@@ -412,7 +672,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 await _friendsRepo.sendFriendRequest(
                                   widget.userId,
                                 );
-                                if (!context.mounted) return;
+
+                                if (!context.mounted) {
+                                  return;
+                                }
+
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                     content: Text('Friend request sent'),
@@ -429,6 +693,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   ),
                 ),
               ),
+
+              // ------------------------------------------------
+              // POSTS
+              // ------------------------------------------------
               StreamBuilder<List<Map<String, dynamic>>>(
                 stream: _postRepo.getUserPostsStream(
                   widget.userId,
@@ -442,6 +710,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                   }
 
                   final posts = snapshot.data ?? [];
+
                   if (posts.isEmpty) {
                     return SliverFillRemaining(
                       hasScrollBody: false,
@@ -468,11 +737,24 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                           ),
                       delegate: SliverChildBuilderDelegate((context, index) {
                         final post = posts[index];
+
+                        // OLD BASE64 MEDIA
                         final images = PostMediaUtils.getImages(post);
-                        final isStatus = images.isEmpty;
+
+                        // NEW CLOUDINARY MEDIA
+                        final media = _getCloudinaryMedia(post);
+
+                        // A post is a status only when
+                        // it has NO old or new media.
+                        final isStatus = images.isEmpty && media.isEmpty;
+
                         final postId = post['id'] as String;
+
                         final currentPrivacy =
                             post['privacy'] as String? ?? 'public';
+
+                        final mediaCount =
+                            media.isNotEmpty ? media.length : images.length;
 
                         return GestureDetector(
                           onTap: () => _openPostDetail(post),
@@ -518,6 +800,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                                   ),
                                                   onTap: () {
                                                     Navigator.pop(ctx);
+
                                                     _showPrivacyEditor(
                                                       postId,
                                                       currentPrivacy,
@@ -537,6 +820,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                                   ),
                                                   onTap: () {
                                                     Navigator.pop(ctx);
+
                                                     _confirmDeletePost(postId);
                                                   },
                                                 ),
@@ -552,45 +836,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             children: [
                               ColoredBox(
                                 color: colorScheme.surfaceContainerHighest,
-                                child:
-                                    isStatus
-                                        ? Container(
-                                          decoration: const BoxDecoration(
-                                            gradient: LinearGradient(
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                              colors: [
-                                                Color(0xFF2563EB),
-                                                Color(0xFF7C3AED),
-                                              ],
-                                            ),
-                                          ),
-                                          padding: const EdgeInsets.all(6),
-                                          child: Center(
-                                            child: Text(
-                                              (post['caption'] as String? ?? '')
-                                                  .trim(),
-                                              maxLines: 4,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ),
-                                        )
-                                        : Image.memory(
-                                          base64Decode(images.first),
-                                          fit: BoxFit.cover,
-                                          errorBuilder:
-                                              (_, __, ___) => const Icon(
-                                                Icons.broken_image,
-                                              ),
-                                        ),
+                                child: _buildProfilePostThumbnail(
+                                  post: post,
+                                  images: images,
+                                  media: media,
+                                  isStatus: isStatus,
+                                ),
                               ),
-                              if (images.length > 1)
+
+                              // MEDIA COUNT
+                              if (mediaCount > 1)
                                 Positioned(
                                   top: 4,
                                   left: 4,
@@ -613,7 +868,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                         ),
                                         const SizedBox(width: 2),
                                         Text(
-                                          '${images.length}',
+                                          '$mediaCount',
                                           style: const TextStyle(
                                             color: Colors.white,
                                             fontSize: 10,
@@ -623,6 +878,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                     ),
                                   ),
                                 ),
+
+                              // PRIVACY ICON
                               if (_isOwnProfile && currentPrivacy != 'public')
                                 Positioned(
                                   top: 4,
@@ -660,8 +917,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 }
 
+// ============================================================
+// STAT COLUMN
+// ============================================================
+
 class _StatColumn extends StatelessWidget {
   const _StatColumn({required this.count, required this.label});
+
   final int count;
   final String label;
 
@@ -684,7 +946,9 @@ class _StatColumn extends StatelessWidget {
   }
 }
 
-// ── Post Detail Sheet ──────────────────────────────────
+// ============================================================
+// POST DETAIL SHEET
+// ============================================================
 
 class _PostDetailSheet extends StatefulWidget {
   const _PostDetailSheet({
@@ -708,8 +972,11 @@ class _PostDetailSheet extends StatefulWidget {
 class _PostDetailSheetState extends State<_PostDetailSheet>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+
   final _commentController = TextEditingController();
+
   bool _sending = false;
+
   String? _replyToCommentId;
   String? _replyToUserName;
   String? _replyToUserId;
@@ -717,6 +984,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
   @override
   void initState() {
     super.initState();
+
     _tabController = TabController(length: 2, vsync: this);
   }
 
@@ -724,8 +992,13 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
   void dispose() {
     _tabController.dispose();
     _commentController.dispose();
+
     super.dispose();
   }
+
+  // ----------------------------------------------------------
+  // REPLY
+  // ----------------------------------------------------------
 
   void _setReplyTo(String commentId, String userName, String userId) {
     setState(() {
@@ -743,10 +1016,21 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
     });
   }
 
+  // ----------------------------------------------------------
+  // SEND COMMENT
+  // ----------------------------------------------------------
+
   Future<void> _send(String postId) async {
     final text = _commentController.text.trim();
-    if (text.isEmpty || _sending) return;
-    setState(() => _sending = true);
+
+    if (text.isEmpty || _sending) {
+      return;
+    }
+
+    setState(() {
+      _sending = true;
+    });
+
     try {
       if (_replyToCommentId != null) {
         await widget.postRepo.replyToComment(
@@ -759,21 +1043,54 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
       } else {
         await widget.postRepo.addComment(postId, text);
       }
+
       _commentController.clear();
+
       _clearReply();
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) {
+        setState(() {
+          _sending = false;
+        });
+      }
     }
   }
+
+  // ----------------------------------------------------------
+  // BUILD DETAIL SHEET
+  // ----------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     final caption = widget.post['caption'] as String? ?? '';
+
+    // OLD BASE64
     final images = PostMediaUtils.getImages(widget.post);
-    final isStatus = images.isEmpty;
+
+    // NEW CLOUDINARY
+    final rawMedia = widget.post['media'];
+
+    final media =
+        rawMedia is List
+            ? rawMedia
+                .whereType<Map>()
+                .map((item) => Map<String, dynamic>.from(item))
+                .where((item) {
+                  final url = item['url']?.toString() ?? '';
+                  return url.isNotEmpty;
+                })
+                .toList()
+            : <Map<String, dynamic>>[];
+
+    // STATUS ONLY IF THERE IS NO MEDIA
+    final isStatus = images.isEmpty && media.isEmpty;
+
     final reactions = Map<String, dynamic>.from(widget.post['reactions'] ?? {});
+
     final postId = widget.post['id'] as String;
+
     final currentPrivacy = widget.post['privacy'] as String? ?? 'public';
+
     final colorScheme = Theme.of(context).colorScheme;
 
     return DraggableScrollableSheet(
@@ -784,6 +1101,9 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
       builder: (context, scrollController) {
         return Column(
           children: [
+            // ------------------------------------------------
+            // HANDLE
+            // ------------------------------------------------
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: Center(
@@ -797,6 +1117,10 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                 ),
               ),
             ),
+
+            // ------------------------------------------------
+            // MEDIA / STATUS
+            // ------------------------------------------------
             if (isStatus)
               Container(
                 width: double.infinity,
@@ -822,8 +1146,17 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
             else
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: PostMediaViewer(images: images, aspectRatio: 4 / 3),
+                child: PostMediaViewer(
+                  images: images,
+                  media: media,
+                  aspectRatio: 4 / 3,
+                  canDownload: widget.isOwner,
+                ),
               ),
+
+            // ------------------------------------------------
+            // CAPTION
+            // ------------------------------------------------
             if (!isStatus && caption.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -832,6 +1165,10 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                   child: Text(caption),
                 ),
               ),
+
+            // ------------------------------------------------
+            // TABS
+            // ------------------------------------------------
             TabBar(
               controller: _tabController,
               tabs: [
@@ -839,10 +1176,17 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                 Tab(text: 'Reactions (${reactions.length})'),
               ],
             ),
+
+            // ------------------------------------------------
+            // TAB CONTENT
+            // ------------------------------------------------
             Expanded(
               child: TabBarView(
                 controller: _tabController,
                 children: [
+                  // ==========================================
+                  // COMMENTS
+                  // ==========================================
                   Column(
                     children: [
                       Expanded(
@@ -857,27 +1201,37 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                                 child: CircularProgressIndicator(),
                               );
                             }
+
                             final docs = snapshot.data?.docs ?? [];
+
                             if (docs.isEmpty) {
                               return const Center(
                                 child: Text('No comments yet.'),
                               );
                             }
+
                             return ListView.builder(
                               itemCount: docs.length,
                               itemBuilder: (context, index) {
                                 final data = docs[index].data();
+
                                 final commentId = docs[index].id;
+
                                 final isMine =
                                     data['userId'] ==
                                     FirebaseAuth.instance.currentUser?.uid;
+
                                 final userName =
                                     data['userName'] as String? ?? 'User';
+
                                 final commentUserId =
                                     data['userId'] as String? ?? '';
+
                                 final text = data['text'] as String? ?? '';
+
                                 final replyToName =
                                     data['replyToName'] as String?;
+
                                 final isReply = replyToName != null;
 
                                 return Padding(
@@ -966,6 +1320,8 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                           },
                         ),
                       ),
+
+                      // REPLY BAR
                       if (_replyToUserName != null)
                         Container(
                           color: colorScheme.surfaceContainerHighest,
@@ -1001,6 +1357,8 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                             ],
                           ),
                         ),
+
+                      // COMMENT INPUT
                       Padding(
                         padding: EdgeInsets.only(
                           left: 12,
@@ -1047,13 +1405,19 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                       ),
                     ],
                   ),
+
+                  // ==========================================
+                  // REACTIONS
+                  // ==========================================
                   reactions.isEmpty
                       ? const Center(child: Text('No reactions yet.'))
                       : ListView.builder(
                         itemCount: reactions.length,
                         itemBuilder: (context, index) {
                           final uid = reactions.keys.elementAt(index);
+
                           final reaction = reactions[uid] as String;
+
                           return FutureBuilder<
                             DocumentSnapshot<Map<String, dynamic>>
                           >(
@@ -1067,6 +1431,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                                   snap.data?.data()?['displayName']
                                       as String? ??
                                   'User';
+
                               return ListTile(
                                 leading: CircleAvatar(
                                   child: Text(
@@ -1089,6 +1454,10 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                 ],
               ),
             ),
+
+            // ------------------------------------------------
+            // OWNER ACTIONS
+            // ------------------------------------------------
             if (widget.isOwner) ...[
               const Divider(height: 1),
               Row(
@@ -1099,6 +1468,7 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                       label: Text('Privacy: $currentPrivacy'),
                       onPressed: () {
                         Navigator.pop(context);
+
                         widget.onEditPrivacy(postId, currentPrivacy);
                       },
                     ),
@@ -1134,8 +1504,10 @@ class _PostDetailSheetState extends State<_PostDetailSheet>
                                 ],
                               ),
                         );
+
                         if (confirm == true) {
                           await widget.postRepo.deletePost(postId);
+
                           widget.onDeleted();
                         }
                       },

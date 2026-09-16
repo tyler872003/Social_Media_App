@@ -1,14 +1,15 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+
 import '../services/report_service.dart';
 import '../services/user_audit_service.dart';
 import '../theme/app_theme.dart';
 
 class UserAuditScreen extends StatefulWidget {
   const UserAuditScreen({super.key, required this.uid, required this.handle});
+
   final String uid;
   final String handle;
 
@@ -32,34 +33,36 @@ class _UserAuditScreenState extends State<UserAuditScreen> {
   }
 
   Future<void> _loadCounts() async {
-    // Each fetch is isolated: if one query fails (wrong collection path,
-    // missing index, denied by security rules), it's logged and the
-    // others still populate instead of every stat getting stuck on "…".
-    unawaited(
-      _reportService
-          .reportCountsForUser(widget.uid)
-          .then((v) {
-            if (!mounted) return;
-            setState(() => _reportCounts = v);
-          })
-          .catchError((e) {
-            debugPrint('reportCountsForUser failed: $e');
-            if (!mounted) return;
-            setState(() => _reportCountsError = e.toString());
-          }),
-    );
+    try {
+      final counts = await _reportService.reportCountsForUser(widget.uid);
 
-    unawaited(
-      _auditService
-          .postCountForUser(widget.uid)
-          .then((v) {
-            if (!mounted) return;
-            setState(() => _postCount = v);
-          })
-          .catchError((e) {
-            debugPrint('postCountForUser failed: $e');
-          }),
-    );
+      if (!mounted) return;
+
+      setState(() {
+        _reportCounts = counts;
+        _reportCountsError = null;
+      });
+    } catch (e) {
+      debugPrint('reportCountsForUser failed: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _reportCountsError = e.toString();
+      });
+    }
+
+    try {
+      final count = await _auditService.postCountForUser(widget.uid);
+
+      if (!mounted) return;
+
+      setState(() {
+        _postCount = count;
+      });
+    } catch (e) {
+      debugPrint('postCountForUser failed: $e');
+    }
   }
 
   Future<void> _runAction(

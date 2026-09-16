@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/firestore_admin_service.dart';
 import '../theme/app_theme.dart';
+import 'post_browse_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   /// Called with a sidebar index to switch sections (e.g. jump to the
@@ -56,11 +57,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Overview Dashboard',
-                        style: Theme.of(context).textTheme.headlineLarge),
+                    Text(
+                      'Overview Dashboard',
+                      style: Theme.of(context).textTheme.headlineLarge,
+                    ),
                     const SizedBox(height: 4),
-                    Text('High-level metrics and recent platform activity.',
-                        style: TextStyle(color: AppColors.onSurfaceVariant)),
+                    Text(
+                      'High-level metrics and recent platform activity.',
+                      style: TextStyle(color: AppColors.onSurfaceVariant),
+                    ),
                   ],
                 ),
               ),
@@ -72,8 +77,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             future: _statsFuture,
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return Text('Error loading stats: ${snapshot.error}',
-                    style: const TextStyle(color: AppColors.error));
+                return Text(
+                  'Error loading stats: ${snapshot.error}',
+                  style: const TextStyle(color: AppColors.error),
+                );
               }
               if (!snapshot.hasData) {
                 return const Padding(
@@ -91,12 +98,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     iconColor: AppColors.primary,
                     value: '${s.totalPosts}',
                     label: 'Total Posts',
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PostBrowseScreen(),
+                      ),
+                    ),
                   ),
                   _StatTile(
                     icon: Icons.groups_outlined,
                     iconColor: AppColors.tertiary,
                     value: '${s.totalUsers}',
                     label: 'Total Users',
+                    onTap: () => widget.onNavigate?.call(1),
                   ),
                   _StatTile(
                     icon: Icons.flag_outlined,
@@ -159,10 +172,14 @@ class _StatTile extends StatelessWidget {
         width: 220,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: highlight ? AppColors.secondary.withValues(alpha: 0.06) : AppColors.surfaceContainerLowest,
+          color: highlight
+              ? AppColors.secondary.withValues(alpha: 0.06)
+              : AppColors.surfaceContainerLowest,
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-            color: highlight ? AppColors.secondary.withValues(alpha: 0.3) : AppColors.outlineVariant,
+            color: highlight
+                ? AppColors.secondary.withValues(alpha: 0.3)
+                : AppColors.outlineVariant,
           ),
         ),
         child: Column(
@@ -177,10 +194,19 @@ class _StatTile extends StatelessWidget {
               child: Icon(icon, color: iconColor, size: 22),
             ),
             const SizedBox(height: 16),
-            Text(value,
-                style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: AppColors.onSurface)),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+                color: AppColors.onSurface,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text(label, style: TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13)),
+            Text(
+              label,
+              style: TextStyle(color: AppColors.onSurfaceVariant, fontSize: 13),
+            ),
           ],
         ),
       ),

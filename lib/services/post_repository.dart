@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import '../models/media_item.dart';
 import 'notification_feed_repository.dart';
 
 class PostRepository {
@@ -15,7 +17,7 @@ class PostRepository {
   // ── Posts ──────────────────────────────────────────────
 
   Future<void> createPost({
-    List<String> base64Images = const [],
+    List<MediaItem> media = const [],
     required String caption,
     required String privacy,
     List<String> closedFriendsIds = const [],
@@ -25,21 +27,30 @@ class PostRepository {
     if (uid == null) return;
 
     final trimmedCaption = caption.trim();
-    if (trimmedCaption.isEmpty && base64Images.isEmpty) {
-      throw ArgumentError('Add a caption or at least one photo.');
+    if (trimmedCaption.isEmpty && media.isEmpty) {
+      throw ArgumentError('Add a caption or at least one photo or video.');
     }
-    if (base64Images.length > 5) {
-      throw ArgumentError('You can upload up to 5 photos.');
+    if (media.length > 5) {
+      throw ArgumentError('You can upload up to 5 media items.');
     }
 
-    final postType = base64Images.isEmpty ? 'status' : 'photo';
+    final hasVideo = media.any((m) => m.type == MediaType.video);
+    final hasImage = media.any((m) => m.type == MediaType.image);
+    final postType =
+        media.isEmpty
+            ? 'status'
+            : (hasVideo && hasImage)
+            ? 'mixed'
+            : hasVideo
+            ? 'video'
+            : 'photo';
+
     final docRef = _firestore.collection('posts').doc();
     await docRef.set({
       'id': docRef.id,
       'userId': uid,
       'postType': postType,
-      'images': base64Images,
-      'base64Data': base64Images.isNotEmpty ? base64Images.first : '',
+      'media': media.map((m) => m.toMap()).toList(),
       'caption': trimmedCaption,
       'privacy': privacy,
       'closedFriendsIds': closedFriendsIds,
@@ -52,14 +63,18 @@ class PostRepository {
       'createdAt': DateTime.now().millisecondsSinceEpoch,
     });
 
-    // Best-effort — don't block post creation on notification delivery.
     unawaited(
       _notifyFriendsOfNewPost(
         uid: uid,
         postId: docRef.id,
         privacy: privacy,
         closedFriendsIds: closedFriendsIds,
-        thumbnail: base64Images.isNotEmpty ? base64Images.first : null,
+        thumbnail:
+            media.isNotEmpty
+                ? (media.first.type == MediaType.video
+                    ? media.first.thumbnailUrl
+                    : media.first.url)
+                : null,
       ).catchError((e) => debugPrint('❌ notifyNewPost failed: $e')),
     );
   }
@@ -78,7 +93,6 @@ class PostRepository {
 
     final userDoc = await _firestore.collection('users').doc(uid).get();
     final friends = List<String>.from(userDoc.data()?['friends'] ?? []);
-    debugPrint('👥 poster friends list: $friends');
     if (friends.isEmpty) {
       debugPrint('🔕 notifyNewPost skipped: friends list is empty');
       return;
@@ -88,7 +102,6 @@ class PostRepository {
         privacy == 'closedFriends'
             ? friends.where(closedFriendsIds.contains).toList()
             : friends;
-    debugPrint('📬 notifyNewPost recipients: $recipients');
 
     if (recipients.isEmpty) {
       debugPrint('🔕 notifyNewPost skipped: no recipients after filtering');
@@ -122,6 +135,38 @@ class PostRepository {
 
     final doc = await _firestore.collection('posts').doc(postId).get();
     if (doc.data()?['userId'] != uid) return;
+
+    // Clean up Cloudinary media (best-effort — don't block post deletion)
+    final data = doc.data();
+    final rawMedia = (data?['media'] as List?) ?? [];
+    final mediaItems =
+        rawMedia
+            .whereType<Map<String, dynamic>>()
+            .map((m) => MediaItem.fromMap(m))
+            .where((m) => m.publicId != null)
+            .toList();
+
+    if (mediaItems.isNotEmpty) {
+      try {
+        final callable = FirebaseFunctions.instance.httpsCallable(
+          'deletePostMedia',
+        );
+        await callable.call({
+          'mediaItems':
+              mediaItems
+                  .map(
+                    (m) => {
+                      'publicId': m.publicId,
+                      'type': m.type == MediaType.video ? 'video' : 'image',
+                    },
+                  )
+                  .toList(),
+          'postOwnerId': uid,
+        });
+      } catch (e) {
+        debugPrint('⚠️ Cloudinary media deletion failed: $e');
+      }
+    }
 
     final comments =
         await _firestore
@@ -280,9 +325,9 @@ class PostRepository {
         'userName': user?.displayName ?? user?.email ?? 'User',
         'text': trimmed,
         'timestamp': FieldValue.serverTimestamp(),
-        'replyTo': null, // null means top-level comment
-        'replyToName': null, // display name of who they replied to
-        'replyToUserId': null, // uid of who they replied to
+        'replyTo': null,
+        'replyToName': null,
+        'replyToUserId': null,
       });
       transaction.update(postRef, {'commentsCount': FieldValue.increment(1)});
     });

@@ -3,11 +3,14 @@ import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:first_app/models/media_item.dart';
+import 'package:first_app/services/cloudinary_service.dart';
 import 'package:first_app/services/post_repository.dart';
 import 'package:first_app/utils/post_media_utils.dart';
 import 'package:first_app/widgets/app_loading.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:video_player/video_player.dart';
 
 class AddPostScreen extends StatefulWidget {
   const AddPostScreen({super.key});
@@ -23,6 +26,9 @@ class _AddPostScreenState extends State<AddPostScreen> {
   final _firestore = FirebaseFirestore.instance;
   bool _isLoading = false;
   final List<File> _imageFiles = [];
+  File? _videoFile;
+  VideoPlayerController? _videoPreviewController;
+  bool _isProcessingVideo = false;
   String _privacy = 'public';
   bool _allowDownload = false;
   Map<String, dynamic>? _userData;
@@ -70,10 +76,19 @@ class _AddPostScreenState extends State<AddPostScreen> {
   }
 
   bool get _canPost {
-    return _captionController.text.trim().isNotEmpty || _imageFiles.isNotEmpty;
+    return _captionController.text.trim().isNotEmpty ||
+        _imageFiles.isNotEmpty ||
+        _videoFile != null;
   }
 
   Future<void> _pickImages() async {
+    if (_videoFile != null) {
+      _showSnack(
+        'Remove the video first — a post can have photos or one video, not both.',
+      );
+      return;
+    }
+
     if (_imageFiles.length >= PostMediaUtils.maxImages) {
       _showSnack('You can add up to ${PostMediaUtils.maxImages} photos.');
       return;
@@ -101,19 +116,92 @@ class _AddPostScreenState extends State<AddPostScreen> {
     setState(() => _imageFiles.removeAt(index));
   }
 
+  Future<void> _pickVideo() async {
+    if (_imageFiles.isNotEmpty) {
+      _showSnack(
+        'Remove your photos first — a post can have photos or one video, not both.',
+      );
+      return;
+    }
+
+    final picker = ImagePicker();
+    final picked = await picker.pickVideo(source: ImageSource.gallery);
+    if (picked == null) return;
+
+    final file = File(picked.path);
+
+    setState(() => _isProcessingVideo = true);
+
+    try {
+      await CloudinaryService.validateMedia(file.path, MediaType.video);
+    } on MediaValidationException catch (e) {
+      if (mounted) {
+        _showSnack(e.message);
+        setState(() => _isProcessingVideo = false);
+      }
+      return;
+    } catch (_) {
+      if (mounted) {
+        _showSnack('This video could not be read. Try a different file.');
+        setState(() => _isProcessingVideo = false);
+      }
+      return;
+    }
+
+    await _videoPreviewController?.dispose();
+    final controller = VideoPlayerController.file(file);
+    try {
+      await controller.initialize();
+    } catch (_) {
+      await controller.dispose();
+      if (mounted) {
+        _showSnack('This video could not be read. Try a different file.');
+        setState(() => _isProcessingVideo = false);
+      }
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _videoFile = file;
+      _videoPreviewController = controller;
+      _isProcessingVideo = false;
+    });
+  }
+
+  void _removeVideo() {
+    _videoPreviewController?.dispose();
+    setState(() {
+      _videoFile = null;
+      _videoPreviewController = null;
+    });
+  }
+
   Future<void> _createPost() async {
     if (!_canPost) {
-      _showSnack('Write something or add at least one photo.');
+      _showSnack('Write something or add at least one photo or video.');
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      final base64Images = <String>[];
-      for (final file in _imageFiles) {
-        final bytes = await file.readAsBytes();
-        base64Images.add(base64Encode(bytes));
+      final mediaItems = <MediaItem>[];
+
+      if (_videoFile != null) {
+        final item = await CloudinaryService.uploadMedia(
+          _videoFile!.path,
+          MediaType.video,
+        );
+        mediaItems.add(item);
+      } else {
+        for (final file in _imageFiles) {
+          final item = await CloudinaryService.uploadMedia(
+            file.path,
+            MediaType.image,
+          );
+          mediaItems.add(item);
+        }
       }
 
       List<String> closedFriendsIds = [];
@@ -122,14 +210,16 @@ class _AddPostScreenState extends State<AddPostScreen> {
       }
 
       await _postRepo.createPost(
-        base64Images: base64Images,
+        media: mediaItems,
         caption: _captionController.text.trim(),
         privacy: _privacy,
         closedFriendsIds: closedFriendsIds,
-        allowDownload: base64Images.isNotEmpty ? _allowDownload : false,
+        allowDownload: mediaItems.isNotEmpty ? _allowDownload : false,
       );
 
       if (mounted) Navigator.pop(context, true);
+    } on MediaValidationException catch (e) {
+      if (mounted) _showSnack(e.message);
     } catch (e) {
       if (mounted) _showSnack('Error: $e');
     } finally {
@@ -241,6 +331,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
   @override
   void dispose() {
     _captionController.dispose();
+    _videoPreviewController?.dispose();
     super.dispose();
   }
 
@@ -437,21 +528,75 @@ class _AddPostScreenState extends State<AddPostScreen> {
                   ),
                 ),
               ],
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: _pickImages,
-                icon: const Icon(Icons.photo_library_outlined),
-                label: Text(
-                  _imageFiles.isEmpty
-                      ? 'Add photos (up to ${PostMediaUtils.maxImages})'
-                      : 'Add more photos',
-                ),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+              if (_videoFile != null && _videoPreviewController != null) ...[
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      AspectRatio(
+                        aspectRatio: _videoPreviewController!.value.aspectRatio,
+                        child: VideoPlayer(_videoPreviewController!),
+                      ),
+                      const Icon(
+                        Icons.play_circle_fill,
+                        color: Colors.white70,
+                        size: 48,
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: _RemovePhotoButton(onTap: _removeVideo),
+                      ),
+                    ],
                   ),
                 ),
+              ],
+              if (_isProcessingVideo) ...[
+                const SizedBox(height: 12),
+                const Center(child: CircularProgressIndicator()),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _videoFile != null ? null : _pickImages,
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: Text(
+                        _imageFiles.isEmpty
+                            ? 'Photos (up to ${PostMediaUtils.maxImages})'
+                            : 'Add more',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          (_imageFiles.isNotEmpty ||
+                                  _videoFile != null ||
+                                  _isProcessingVideo)
+                              ? null
+                              : _pickVideo,
+                      icon: const Icon(Icons.videocam_outlined),
+                      label: const Text('Video'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               if (_imageFiles.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -526,7 +671,6 @@ class _RemovePhotoButton extends StatelessWidget {
     );
   }
 }
-
 // ── Manage Closed Friends Screen ───────────────────────
 
 class ManageClosedFriendsScreen extends StatefulWidget {

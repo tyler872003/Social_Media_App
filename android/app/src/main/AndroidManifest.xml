@@ -13,7 +13,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <application
-        android:label="first_app"
+        android:label="VibeStream"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <!-- Let Dart call Firebase.initializeApp only; native auto-init causes duplicate-app. -->
