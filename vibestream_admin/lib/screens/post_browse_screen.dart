@@ -1,9 +1,13 @@
+// lib/screens/post_browse_screen.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../models/admin_post.dart';
 import '../services/firestore_admin_service.dart';
+import '../services/post_deletion.dart';
 import '../widgets/post_thumbnail.dart';
+import 'post_detail_screen.dart';
 
 class PostBrowseScreen extends StatefulWidget {
   const PostBrowseScreen({super.key});
@@ -101,7 +105,37 @@ class _PostBrowseScreenState extends State<PostBrowseScreen> {
   }
 
   // --------------------------------------------------
-  // Remove post
+  // Open full post
+  // --------------------------------------------------
+
+  Future<void> _openDetail(AdminPost post) async {
+    final result = await Navigator.push<String?>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PostDetailScreen(
+          postId: post.id,
+          displayName: _getDisplayName(post),
+          email: _getEmail(post),
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+
+    setState(() {
+      if (result == 'deleted') {
+        _posts.removeWhere((p) => p.id == post.id);
+      } else {
+        final i = _posts.indexWhere((p) => p.id == post.id);
+        if (i != -1) {
+          _posts[i] = _posts[i].copyWith(status: result);
+        }
+      }
+    });
+  }
+
+  // --------------------------------------------------
+  // Remove post (soft: hides it, keeps it in Firebase)
   // --------------------------------------------------
 
   Future<void> _removePost(AdminPost post) async {
@@ -157,6 +191,20 @@ class _PostBrowseScreenState extends State<PostBrowseScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to restore post: $e')));
+    }
+  }
+
+  // --------------------------------------------------
+  // Delete post permanently (from Firebase)
+  // --------------------------------------------------
+
+  Future<void> _deletePermanently(AdminPost post) async {
+    final deleted = await confirmAndDeletePost(context, post.id);
+
+    if (deleted && mounted) {
+      setState(() {
+        _posts.removeWhere((p) => p.id == post.id);
+      });
     }
   }
 
@@ -293,6 +341,9 @@ class _PostBrowseScreenState extends State<PostBrowseScreen> {
                 vertical: 6,
               ),
 
+              // Tap anywhere on the row to see the whole post.
+              onTap: () => _openDetail(post),
+
               // ----------------------------------------
               // Thumbnail
               // ----------------------------------------
@@ -342,6 +393,12 @@ class _PostBrowseScreenState extends State<PostBrowseScreen> {
                       style: TextButton.styleFrom(foregroundColor: Colors.red),
                       child: const Text('Remove'),
                     ),
+
+                  IconButton(
+                    tooltip: 'Delete permanently',
+                    icon: const Icon(Icons.delete_forever, color: Colors.red),
+                    onPressed: () => _deletePermanently(post),
+                  ),
                 ],
               ),
             );

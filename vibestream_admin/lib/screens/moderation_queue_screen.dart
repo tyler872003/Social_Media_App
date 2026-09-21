@@ -9,7 +9,15 @@ class ModerationQueueScreen extends StatefulWidget {
   /// (no Scaffold/AppBar).
   final bool embedded;
 
-  const ModerationQueueScreen({super.key, this.embedded = false});
+  /// Search text coming from the AdminShell top bar. Optional so the screen
+  /// can still be pushed standalone (e.g. from the dashboard) without one.
+  final ValueListenable<String>? searchQuery;
+
+  const ModerationQueueScreen({
+    super.key,
+    this.embedded = false,
+    this.searchQuery,
+  });
 
   @override
   State<ModerationQueueScreen> createState() => _ModerationQueueScreenState();
@@ -17,6 +25,9 @@ class ModerationQueueScreen extends StatefulWidget {
 
 class _ModerationQueueScreenState extends State<ModerationQueueScreen> {
   final _service = FirestoreAdminService();
+
+  /// Fallback used when no search query is supplied.
+  static final ValueNotifier<String> _noSearch = ValueNotifier<String>('');
 
   @override
   Widget build(BuildContext context) {
@@ -33,66 +44,90 @@ class _ModerationQueueScreenState extends State<ModerationQueueScreen> {
   }
 
   Widget _buildContent() {
-    return StreamBuilder<List<AdminReport>>(
-      stream: _service.pendingReportsStream(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: SelectableText(
-                'Error loading reports:\n\n${snapshot.error}',
-                style: const TextStyle(color: AppColors.error),
-              ),
-            ),
-          );
-        }
+    return ValueListenableBuilder<String>(
+      valueListenable: widget.searchQuery ?? _noSearch,
+      builder: (context, rawQuery, _) {
+        final query = rawQuery.trim();
+        final q = query.toLowerCase();
 
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final reports = snapshot.data!;
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Moderation Queue',
-                style: Theme.of(context).textTheme.headlineLarge,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Review and manage reported content.',
-                style: TextStyle(color: AppColors.onSurfaceVariant),
-              ),
-              const SizedBox(height: 24),
-
-              if (reports.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 40),
-                  child: Text('No pending reports 🎉'),
-                )
-              else
-                ...reports.map(
-                  (r) => Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-
-                    // IMPORTANT:
-                    // Give every report its own stable identity.
-                    // This prevents Flutter from reusing the state
-                    // of deleted report C for report D.
-                    child: _ReportCard(
-                      key: ValueKey(r.id),
-                      report: r,
-                      service: _service,
-                    ),
+        return StreamBuilder<List<AdminReport>>(
+          stream: _service.pendingReportsStream(),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: SelectableText(
+                    'Error loading reports:\n\n${snapshot.error}',
+                    style: const TextStyle(color: AppColors.error),
                   ),
                 ),
-            ],
-          ),
+              );
+            }
+
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final allReports = snapshot.data!;
+
+            // Filter by reason, post id, or report id.
+            final reports = q.isEmpty
+                ? allReports
+                : allReports
+                      .where(
+                        (r) =>
+                            r.reason.toLowerCase().contains(q) ||
+                            r.postId.toLowerCase().contains(q) ||
+                            r.id.toLowerCase().contains(q),
+                      )
+                      .toList();
+
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Moderation Queue',
+                    style: Theme.of(context).textTheme.headlineLarge,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Review and manage reported content.',
+                    style: TextStyle(color: AppColors.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 24),
+
+                  if (reports.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      child: Text(
+                        q.isNotEmpty
+                            ? 'No reports match "$query".'
+                            : 'No pending reports 🎉',
+                      ),
+                    )
+                  else
+                    ...reports.map(
+                      (r) => Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+
+                        // IMPORTANT:
+                        // Give every report its own stable identity.
+                        // This prevents Flutter from reusing the state
+                        // of deleted report C for report D.
+                        child: _ReportCard(
+                          key: ValueKey(r.id),
+                          report: r,
+                          service: _service,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
         );
       },
     );

@@ -1,13 +1,18 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 //import '../scripts/backfill_user_status.dart'; // TEMPORARY — remove after running once
 import 'user_audit_screen.dart';
 
 class UserManagementScreen extends StatefulWidget {
-  const UserManagementScreen({super.key});
+  /// Search text coming from the AdminShell top bar.
+  final ValueListenable<String> searchQuery;
+
+  const UserManagementScreen({super.key, required this.searchQuery});
 
   @override
   State<UserManagementScreen> createState() => _UserManagementScreenState();
@@ -23,7 +28,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     'Suspended',
   ];
   String _statusFilter = 'All Statuses';
-  String _searchQuery = '';
+
+  /// Current search text, driven by the shell's search bar.
+  String get _searchQuery => widget.searchQuery.value.trim();
 
   int _currentPage = 1;
   int _totalCount = 0;
@@ -44,7 +51,18 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   @override
   void initState() {
     super.initState();
+    widget.searchQuery.addListener(_onSearchChanged);
     _resetAndLoad();
+  }
+
+  @override
+  void dispose() {
+    widget.searchQuery.removeListener(_onSearchChanged);
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    if (mounted) setState(() {});
   }
 
   Query<Map<String, dynamic>> _baseQuery() {
@@ -87,15 +105,72 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     });
   }
 
+  /// Handles a choice from the row's "..." menu. Suspending asks for
+  /// confirmation first because it locks the user out of the app.
+  Future<void> _onStatusSelected(_AdminUser user, String status) async {
+    if (status == 'suspended') {
+      // Don't let an admin lock themselves out.
+      if (user.uid == FirebaseAuth.instance.currentUser?.uid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("You can't suspend your own account.")),
+        );
+        return;
+      }
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Suspend ${user.displayName}?'),
+          content: const Text(
+            'They will be signed out and blocked from using the app until '
+            'you set them back to Active.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Suspend'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await _setStatus(user, status);
+  }
+
   Future<void> _setStatus(_AdminUser user, String status) async {
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-      'status': status,
-      'statusUpdatedAt': FieldValue.serverTimestamp(),
-    });
-    setState(() {
-      final i = _pageUsers.indexWhere((u) => u.uid == user.uid);
-      if (i != -1) _pageUsers[i] = user.copyWith(status: status);
-    });
+    try {
+      final update = <String, dynamic>{
+        'status': status,
+        'statusUpdatedAt': FieldValue.serverTimestamp(),
+      };
+      if (status == 'suspended') {
+        update['suspendedAt'] = FieldValue.serverTimestamp();
+      } else if (user.status == 'suspended') {
+        update['suspendedAt'] = FieldValue.delete();
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update(update);
+
+      if (!mounted) return;
+      setState(() {
+        final i = _pageUsers.indexWhere((u) => u.uid == user.uid);
+        if (i != -1) _pageUsers[i] = user.copyWith(status: status);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to update status: $e')));
+    }
   }
 
   void _openAudit(_AdminUser user) {
@@ -110,8 +185,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   // TEMPORARY — remove this method after running the backfill once.
 
   List<_AdminUser> get _visibleUsers {
-    if (_searchQuery.isEmpty) return _pageUsers;
-    final q = _searchQuery.toLowerCase();
+    final query = _searchQuery;
+    if (query.isEmpty) return _pageUsers;
+    final q = query.toLowerCase();
     return _pageUsers
         .where(
           (u) =>
@@ -177,6 +253,9 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final visibleUsers = _visibleUsers;
+    final searching = _searchQuery.isNotEmpty;
+
     return Padding(
       padding: const EdgeInsets.all(32),
       child: Column(
@@ -233,16 +312,22 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                   Expanded(
                     child: _loading
                         ? const Center(child: CircularProgressIndicator())
-                        : _visibleUsers.isEmpty
-                        ? const Center(child: Text('No users found.'))
+                        : visibleUsers.isEmpty
+                        ? Center(
+                            child: Text(
+                              searching
+                                  ? 'No users match "$_searchQuery".'
+                                  : 'No users found.',
+                            ),
+                          )
                         : ListView.separated(
-                            itemCount: _visibleUsers.length,
+                            itemCount: visibleUsers.length,
                             separatorBuilder: (_, __) => const Divider(
                               height: 1,
                               color: AppColors.outlineVariant,
                             ),
                             itemBuilder: (context, i) =>
-                                _buildUserRow(_visibleUsers[i]),
+                                _buildUserRow(visibleUsers[i]),
                           ),
                   ),
                   const Divider(height: 1, color: AppColors.outlineVariant),
@@ -368,7 +453,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
               width: 60,
               child: PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, size: 20),
-                onSelected: (value) => _setStatus(user, value),
+                onSelected: (value) => _onStatusSelected(user, value),
                 itemBuilder: (context) => [
                   if (user.status != 'active')
                     const PopupMenuItem(

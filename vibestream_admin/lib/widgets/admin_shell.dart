@@ -21,6 +21,10 @@ class _AdminShellState extends State<AdminShell> {
   int _selected = 0;
   final _authService = AdminAuthService();
 
+  // Search state shared with the screens that can be filtered.
+  final _searchController = TextEditingController();
+  final ValueNotifier<String> _searchQuery = ValueNotifier<String>('');
+
   static const _destinations = [
     (icon: Icons.dashboard_outlined, label: 'Dashboard'),
     (icon: Icons.people_outline, label: 'User Management'),
@@ -29,6 +33,33 @@ class _AdminShellState extends State<AdminShell> {
   ];
 
   void _navigateTo(int index) => setState(() => _selected = index);
+
+  /// Live-filters as the admin types.
+  void _onSearchChanged(String value) {
+    _searchQuery.value = value.trim();
+  }
+
+  /// On Enter: apply the query, and if the current tab has nothing to
+  /// filter (Dashboard / Settings), jump to User Management.
+  void _onSearchSubmitted(String value) {
+    final query = value.trim();
+    _searchQuery.value = query;
+    if (query.isNotEmpty && _selected != 1 && _selected != 2) {
+      _navigateTo(1);
+    }
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    _searchQuery.value = '';
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchQuery.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,8 +77,11 @@ class _AdminShellState extends State<AdminShell> {
                     index: _selected,
                     children: [
                       DashboardScreen(onNavigate: _navigateTo),
-                      const UserManagementScreen(),
-                      const ModerationQueueScreen(embedded: true),
+                      UserManagementScreen(searchQuery: _searchQuery),
+                      ModerationQueueScreen(
+                        embedded: true,
+                        searchQuery: _searchQuery,
+                      ),
                       const SettingsScreen(),
                     ],
                   ),
@@ -73,11 +107,17 @@ class _AdminShellState extends State<AdminShell> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('VibeStream',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        color: AppColors.primary, fontWeight: FontWeight.w800)),
-                Text('Admin Console',
-                    style: Theme.of(context).textTheme.labelMedium),
+                Text(
+                  'VibeStream',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  'Admin Console',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
               ],
             ),
           ),
@@ -122,9 +162,23 @@ class _AdminShellState extends State<AdminShell> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420),
               child: TextField(
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                onChanged: _onSearchChanged,
+                onSubmitted: _onSearchSubmitted,
                 decoration: InputDecoration(
                   hintText: 'Search users, reports...',
                   prefixIcon: const Icon(Icons.search, size: 20),
+                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _searchController,
+                    builder: (_, value, __) => value.text.isEmpty
+                        ? const SizedBox.shrink()
+                        : IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            tooltip: 'Clear search',
+                            onPressed: _clearSearch,
+                          ),
+                  ),
                   contentPadding: EdgeInsets.zero,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
@@ -135,18 +189,27 @@ class _AdminShellState extends State<AdminShell> {
             ),
           ),
           const Spacer(),
-          const Icon(Icons.notifications_none, color: AppColors.onSurfaceVariant),
+          const Icon(
+            Icons.notifications_none,
+            color: AppColors.onSurfaceVariant,
+          ),
           const SizedBox(width: 16),
           const Icon(Icons.help_outline, color: AppColors.onSurfaceVariant),
           const SizedBox(width: 16),
           const CircleAvatar(
             radius: 16,
             backgroundColor: AppColors.surfaceContainerHigh,
-            child: Icon(Icons.person, size: 18, color: AppColors.onSurfaceVariant),
+            child: Icon(
+              Icons.person,
+              size: 18,
+              color: AppColors.onSurfaceVariant,
+            ),
           ),
           const SizedBox(width: 8),
-          const Text('Admin Profile',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+          const Text(
+            'Admin Profile',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+          ),
         ],
       ),
     );
@@ -169,7 +232,9 @@ class _SidebarItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? AppColors.primary.withValues(alpha: 0.1) : Colors.transparent,
+      color: selected
+          ? AppColors.primary.withValues(alpha: 0.1)
+          : Colors.transparent,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -178,12 +243,20 @@ class _SidebarItem extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: [
-              Icon(icon, size: 20, color: selected ? AppColors.primary : AppColors.onSurfaceVariant),
+              Icon(
+                icon,
+                size: 20,
+                color: selected
+                    ? AppColors.primary
+                    : AppColors.onSurfaceVariant,
+              ),
               const SizedBox(width: 12),
               Text(
                 label,
                 style: TextStyle(
-                  color: selected ? AppColors.primary : AppColors.onSurfaceVariant,
+                  color: selected
+                      ? AppColors.primary
+                      : AppColors.onSurfaceVariant,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   fontSize: 14,
                 ),
