@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-// TODO: fix these import paths to match where the files actually live in
-// your project (they mirror the pattern used in main_navigation_screen.dart).
 import 'package:first_app/services/friends_repository.dart';
 import 'package:first_app/services/notification_feed_repository.dart';
 import 'package:first_app/services/notification_model.dart';
@@ -34,12 +32,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         centerTitle: true,
         backgroundColor: colorScheme.surface,
         elevation: 0,
-        /* actions: [
-          TextButton(
-            onPressed: () => _notificationRepo.markAllAsRead(),
-            child: const Text('Mark all read'),
-          ),
-        ],*/
       ),
       body: StreamBuilder<List<AppNotification>>(
         stream: _notificationRepo.notificationsStream(),
@@ -47,7 +39,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+
           final notifications = snapshot.data ?? [];
+
           if (notifications.isEmpty) {
             return _EmptyState(colorScheme: colorScheme);
           }
@@ -59,6 +53,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             itemCount: groups.length,
             itemBuilder: (context, index) {
               final group = groups[index];
+
               return _NotificationGroup(
                 label: group.label,
                 notifications: group.items,
@@ -83,6 +78,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
     for (final n in notifications) {
       final d = DateTime(n.timestamp.year, n.timestamp.month, n.timestamp.day);
+
       if (d == today) {
         todayItems.add(n);
       } else if (d == yesterday) {
@@ -93,34 +89,43 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
 
     final groups = <_Group>[];
-    if (todayItems.isNotEmpty) groups.add(_Group('TODAY', todayItems));
+
+    if (todayItems.isNotEmpty) {
+      groups.add(_Group('TODAY', todayItems));
+    }
+
     if (yesterdayItems.isNotEmpty) {
       groups.add(_Group('YESTERDAY', yesterdayItems));
     }
-    if (earlierItems.isNotEmpty) groups.add(_Group('EARLIER', earlierItems));
+
+    if (earlierItems.isNotEmpty) {
+      groups.add(_Group('EARLIER', earlierItems));
+    }
+
     return groups;
   }
 
   Future<void> _handleTap(AppNotification n) async {
-    if (!n.isRead) await _notificationRepo.markAsRead(n.id);
+    if (!n.isRead) {
+      await _notificationRepo.markAsRead(n.id);
+    }
+
     if (!mounted) return;
 
     switch (n.type) {
       case NotificationType.story:
         if (n.storyId == null) return;
+
         Navigator.push(
           context,
           MaterialPageRoute(
-            // TODO: match this to ViewStoryScreen's actual constructor —
-            // adjust if it expects a Story object or a list of stories
-            // (for swipe-through-a-user's-stories behavior) instead of a
-            // single storyId.
             builder:
                 (_) =>
                     ViewStoryScreen(storyId: n.storyId!, user: {}, stories: []),
           ),
         );
         break;
+
       case NotificationType.friendRequest:
         Navigator.push(
           context,
@@ -129,8 +134,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
         );
         break;
+
       case NotificationType.newPost:
         if (n.postId == null) return;
+
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -149,6 +156,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 class _Group {
   final String label;
   final List<AppNotification> items;
+
   _Group(this.label, this.items);
 }
 
@@ -269,19 +277,24 @@ class _NotificationTile extends StatelessWidget {
   }
 
   Widget _buildMessage(BuildContext context) {
-    final style = const TextStyle(fontSize: 14, height: 1.3);
+    const style = TextStyle(fontSize: 14, height: 1.3);
+
     String action;
+
     switch (notification.type) {
       case NotificationType.story:
         action = 'posted a new story';
         break;
+
       case NotificationType.friendRequest:
         action = 'sent you a friend request';
         break;
+
       case NotificationType.newPost:
         action = 'added a new post';
         break;
     }
+
     return RichText(
       text: TextSpan(
         style: style.copyWith(color: Theme.of(context).colorScheme.onSurface),
@@ -298,31 +311,102 @@ class _NotificationTile extends StatelessWidget {
 
   Widget _buildTrailing(BuildContext context) {
     final thumb = notification.postThumbnail;
+
     if (notification.type == NotificationType.newPost &&
         thumb != null &&
-        thumb.isNotEmpty) {
+        thumb.trim().isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: Image.memory(
-          base64Decode(thumb),
-          width: 48,
-          height: 48,
-          fit: BoxFit.cover,
-        ),
+        child: _NotificationThumbnail(thumbnail: thumb),
       );
     }
+
     if (notification.type == NotificationType.friendRequest) {
       return _AcceptButton(
         fromUserId: notification.fromUserId,
         onAccept: onAccept,
       );
     }
+
     return const SizedBox.shrink();
+  }
+}
+
+/// Displays notification post thumbnails.
+///
+/// Supports:
+/// 1. Cloudinary HTTP/HTTPS image URLs
+/// 2. data:image/...;base64,...
+/// 3. Old plain Base64 strings
+///
+/// Invalid thumbnail data will show a placeholder instead of crashing.
+class _NotificationThumbnail extends StatelessWidget {
+  const _NotificationThumbnail({required this.thumbnail});
+
+  final String thumbnail;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = thumbnail.trim();
+
+    // NEW: Cloudinary / normal network image.
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return Image.network(
+        value,
+        width: 48,
+        height: 48,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return _brokenImage();
+        },
+      );
+    }
+
+    try {
+      String base64Value = value;
+
+      // Supports:
+      // data:image/jpeg;base64,/9j/4AAQ...
+      if (value.startsWith('data:')) {
+        final commaIndex = value.indexOf(',');
+
+        if (commaIndex == -1) {
+          return _brokenImage();
+        }
+
+        base64Value = value.substring(commaIndex + 1);
+      }
+
+      return Image.memory(
+        base64Decode(base64Value),
+        width: 48,
+        height: 48,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) {
+          return _brokenImage();
+        },
+      );
+    } catch (_) {
+      // Never allow malformed notification thumbnail data
+      // to crash the Notifications screen.
+      return _brokenImage();
+    }
+  }
+
+  Widget _brokenImage() {
+    return Container(
+      width: 48,
+      height: 48,
+      alignment: Alignment.center,
+      color: Colors.grey.shade200,
+      child: const Icon(Icons.image_not_supported_outlined, size: 22),
+    );
   }
 }
 
 class _AcceptButton extends StatelessWidget {
   const _AcceptButton({required this.fromUserId, required this.onAccept});
+
   final String fromUserId;
   final VoidCallback onAccept;
 
@@ -332,8 +416,12 @@ class _AcceptButton extends StatelessWidget {
       stream: FriendsRepository().requestStatusStream(fromUserId),
       builder: (context, snapshot) {
         final data = snapshot.data?.data();
+
         final isPendingReceived = data != null && data['type'] == 'received';
-        if (!isPendingReceived) return const SizedBox.shrink();
+
+        if (!isPendingReceived) {
+          return const SizedBox.shrink();
+        }
 
         return ElevatedButton(
           onPressed: onAccept,
@@ -354,11 +442,13 @@ class _AcceptButton extends StatelessWidget {
 
 class _Avatar extends StatelessWidget {
   const _Avatar({required this.notification});
+
   final AppNotification notification;
 
   @override
   Widget build(BuildContext context) {
     final provider = decodeAvatarImage(notification.fromUserPhoto);
+
     final badge = _badgeFor(notification.type);
 
     return Stack(
@@ -395,8 +485,10 @@ class _Avatar extends StatelessWidget {
     switch (type) {
       case NotificationType.story:
         return _Badge(Icons.play_circle_fill_rounded, Colors.pinkAccent);
+
       case NotificationType.friendRequest:
         return _Badge(Icons.person_add_rounded, Colors.deepPurpleAccent);
+
       case NotificationType.newPost:
         return _Badge(Icons.grid_on_rounded, Colors.blueAccent);
     }
@@ -406,11 +498,13 @@ class _Avatar extends StatelessWidget {
 class _Badge {
   final IconData icon;
   final Color color;
+
   _Badge(this.icon, this.color);
 }
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.colorScheme});
+
   final ColorScheme colorScheme;
 
   @override
@@ -438,31 +532,64 @@ class _EmptyState extends StatelessWidget {
 String _timeLabel(DateTime dt) {
   final now = DateTime.now();
   final diff = now.difference(dt);
+
   final today = DateTime(now.year, now.month, now.day);
+
   final dtDay = DateTime(dt.year, dt.month, dt.day);
 
   if (dtDay == today) {
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inMinutes < 1) {
+      return 'Just now';
+    }
+
+    if (diff.inMinutes < 60) {
+      return '${diff.inMinutes}m ago';
+    }
+
     return '${diff.inHours}h ago';
   }
-  if (dtDay == today.subtract(const Duration(days: 1))) return 'Yesterday';
-  if (diff.inDays < 7) return '${diff.inDays}d ago';
+
+  if (dtDay == today.subtract(const Duration(days: 1))) {
+    return 'Yesterday';
+  }
+
+  if (diff.inDays < 7) {
+    return '${diff.inDays}d ago';
+  }
+
   return '${dt.month}/${dt.day}/${dt.year}';
 }
 
-/// users/{uid}.photoUrl stores a full data URI (confirmed from your
-/// Firestore console: "data:image/jpeg;base64,/9j/4AAQ..."), not a bare
-/// base64 string or an http(s) link — this decodes that shape. Reused in
-/// post_detail_screen.dart's _PostHeader too.
+/// Supports:
+/// - HTTP/HTTPS profile URLs
+/// - data:image/...;base64,...
+/// - old bare Base64 strings
 ImageProvider? decodeAvatarImage(String? photo) {
-  if (photo == null || photo.isEmpty) return null;
-  if (photo.startsWith('http')) return NetworkImage(photo);
+  if (photo == null || photo.isEmpty) {
+    return null;
+  }
+
+  if (photo.startsWith('http')) {
+    return NetworkImage(photo);
+  }
+
   if (photo.startsWith('data:')) {
     final commaIndex = photo.indexOf(',');
-    if (commaIndex == -1) return null;
-    return MemoryImage(base64Decode(photo.substring(commaIndex + 1)));
+
+    if (commaIndex == -1) {
+      return null;
+    }
+
+    try {
+      return MemoryImage(base64Decode(photo.substring(commaIndex + 1)));
+    } catch (_) {
+      return null;
+    }
   }
-  // Fallback: bare base64 with no prefix.
-  return MemoryImage(base64Decode(photo));
+
+  try {
+    return MemoryImage(base64Decode(photo));
+  } catch (_) {
+    return null;
+  }
 }

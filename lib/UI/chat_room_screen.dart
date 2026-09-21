@@ -10,16 +10,20 @@ import 'package:first_app/UI/add_group_members_screen.dart';
 import 'package:first_app/UI/agora_call_screen.dart';
 import 'package:first_app/UI/call_history_screen.dart';
 import 'package:first_app/UI/chat_media_files_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:first_app/models/media_item.dart';
 import 'package:first_app/services/app_theme_service.dart';
 import 'package:first_app/services/chat_repository.dart';
+import 'package:first_app/services/cloudinary_service.dart';
 import 'package:first_app/services/local_notification_service.dart';
 import 'package:first_app/services/notification_repository.dart';
 import 'package:first_app/widgets/mute_dialog.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:video_player/video_player.dart';
+
 import '../UI/photo_viewer_screen.dart';
 
 class ChatRoomScreen extends StatefulWidget {
@@ -44,6 +48,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _controller = TextEditingController();
   final _repo = ChatRepository();
   final _notifRepo = NotificationRepository();
+
   bool _ready = false;
   Timer? _clockTicker;
 
@@ -52,47 +57,73 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   bool _isBlocked = false;
 
+  // Used for both Cloudinary image and video uploads.
+  bool _isUploadingMedia = false;
+
   @override
   void initState() {
     super.initState();
+
     activeChatId = widget.chatId;
+
     AppThemeService.instance.addListener(_onThemeChanged);
+
     _clockTicker = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     });
+
     _prepare();
   }
 
   void _onThemeChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _prepare() async {
     final self = FirebaseAuth.instance.currentUser;
     if (self == null) return;
+
     if (widget.otherUserId.isNotEmpty) {
       await _repo.ensureChatDocument(
         chatId: widget.chatId,
         participants: [self.uid, widget.otherUserId],
       );
     }
-    if (mounted) setState(() => _ready = true);
+
+    if (mounted) {
+      setState(() => _ready = true);
+    }
   }
 
   @override
   void dispose() {
-    if (activeChatId == widget.chatId) activeChatId = null;
+    if (activeChatId == widget.chatId) {
+      activeChatId = null;
+    }
+
     AppThemeService.instance.removeListener(_onThemeChanged);
     _clockTicker?.cancel();
     _controller.dispose();
     _audioRecorder.dispose();
+
     super.dispose();
   }
 
   void _showError(String msg) {
     if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
+
+  // ============================================================
+  // CALLS
+  // ============================================================
 
   DocumentReference<Map<String, dynamic>> get _activeCallRef =>
       FirebaseFirestore.instance
@@ -108,6 +139,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final selfId = FirebaseAuth.instance.currentUser?.uid;
     final self = FirebaseAuth.instance.currentUser;
     final navigator = Navigator.of(context);
+
     try {
       if (announce && selfId != null) {
         await _activeCallRef
@@ -127,11 +159,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             .timeout(const Duration(seconds: 8));
 
         final callOutcome = await _waitForCallOutcome();
+
         if (callOutcome != 'accepted') {
           await _sendCallOutcomeMessage(
             outcome: callOutcome,
             isVideoCall: isVideoCall,
           );
+
           if (callOutcome == 'declined') {
             _showError('Call declined');
           } else if (callOutcome == 'missed') {
@@ -139,11 +173,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           } else if (callOutcome == 'cancelled') {
             _showError('Call cancelled');
           }
+
           return;
         }
       }
 
       final callStartedAt = DateTime.now();
+
       await _repo.sendMessage(
         chatId: widget.chatId,
         text: isVideoCall ? 'video' : 'voice',
@@ -163,6 +199,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
       final durationSeconds =
           DateTime.now().difference(callStartedAt).inSeconds;
+
       await _repo.sendMessage(
         chatId: widget.chatId,
         text: isVideoCall ? 'video' : 'voice',
@@ -179,6 +216,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       }
     } catch (e) {
       _showError('Call setup failed: $e');
+
       await navigator.push(
         MaterialPageRoute<void>(
           builder:
@@ -197,6 +235,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     required bool isVideoCall,
   }) async {
     String label;
+
     if (outcome == 'declined') {
       label = isVideoCall ? 'Declined video call' : 'Declined voice call';
     } else if (outcome == 'missed') {
@@ -206,6 +245,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } else {
       return;
     }
+
     await _repo.sendMessage(
       chatId: widget.chatId,
       text: label,
@@ -216,6 +256,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<String> _waitForCallOutcome() async {
     String result = 'missed';
     Timer? timeoutTimer;
+
     if (!mounted) return result;
 
     final dialogResult = await showDialog<String>(
@@ -223,12 +264,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       barrierDismissible: false,
       builder: (dialogContext) {
         final dialogNav = Navigator.of(dialogContext);
+
         timeoutTimer = Timer(const Duration(seconds: 30), () async {
           await _activeCallRef.set({
             'status': 'missed',
             'missedAt': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
-          if (dialogNav.canPop()) dialogNav.pop('missed');
+
+          if (dialogNav.canPop()) {
+            dialogNav.pop('missed');
+          }
         });
 
         return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -236,11 +281,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           builder: (context, snapshot) {
             final status =
                 snapshot.data?.data()?['status'] as String? ?? 'ringing';
+
             if (status != 'ringing') {
               WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (dialogNav.canPop()) dialogNav.pop(status);
+                if (dialogNav.canPop()) {
+                  dialogNav.pop(status);
+                }
               });
             }
+
             return AlertDialog(
               title: Text(
                 isClosedStatus(status)
@@ -259,7 +308,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       'status': 'cancelled',
                       'cancelledAt': FieldValue.serverTimestamp(),
                     }, SetOptions(merge: true));
-                    if (dialogNav.canPop()) dialogNav.pop('cancelled');
+
+                    if (dialogNav.canPop()) {
+                      dialogNav.pop('cancelled');
+                    }
                   },
                   child: const Text('Cancel call'),
                 ),
@@ -269,8 +321,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         );
       },
     );
+
     timeoutTimer?.cancel();
-    if (dialogResult != null && dialogResult.isNotEmpty) result = dialogResult;
+
+    if (dialogResult != null && dialogResult.isNotEmpty) {
+      result = dialogResult;
+    }
+
     return result;
   }
 
@@ -282,11 +339,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   String _formatCallDuration(int totalSeconds) {
-    if (totalSeconds < 0) totalSeconds = 0;
+    if (totalSeconds < 0) {
+      totalSeconds = 0;
+    }
+
     final minutes = totalSeconds ~/ 60;
     final seconds = totalSeconds % 60;
+
     return '${_twoDigits(minutes)}:${_twoDigits(seconds)}';
   }
+
+  // ============================================================
+  // GROUP CHAT
+  // ============================================================
 
   Future<void> _leaveGroup() async {
     final confirmed = await showDialog<bool>(
@@ -295,7 +360,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           (ctx) => AlertDialog(
             title: const Text('Leave Group'),
             content: const Text(
-              'Are you sure you want to leave this group? You will no longer receive messages from it.',
+              'Are you sure you want to leave this group? '
+              'You will no longer receive messages from it.',
             ),
             actions: [
               TextButton(
@@ -309,21 +375,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ],
           ),
     );
+
     if (confirmed != true) return;
+
     try {
       await _repo.leaveGroupChat(widget.chatId);
-      if (mounted) Navigator.of(context).pop();
+
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
     } catch (e) {
-      if (mounted) _showError('Failed to leave group: $e');
+      if (mounted) {
+        _showError('Failed to leave group: $e');
+      }
     }
   }
 
-  // ── View Group Members ─────────────────────────────────
   Future<void> _showGroupMembers() async {
     final snap = await _repo.chatDocument(widget.chatId).get();
+
     final participantIds = List<String>.from(
       snap.data()?['participants'] ?? [],
     );
+
     final adminId = snap.data()?['admin'] as String?;
 
     if (!mounted) return;
@@ -339,6 +413,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ),
       builder: (ctx) {
         final colorScheme = Theme.of(ctx).colorScheme;
+
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -368,15 +443,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 itemBuilder: (context, index) {
                   final uid = participantIds[index];
                   final userData = usersMap[uid];
+
                   final name =
                       userData?['displayName'] as String? ??
                       userData?['email'] as String? ??
                       'Unknown';
+
                   final photoUrl = userData?['photoUrl'] as String?;
+
                   final isAdmin = uid == adminId;
+
                   final isMe = uid == FirebaseAuth.instance.currentUser?.uid;
 
                   ImageProvider? imageProvider;
+
                   if (photoUrl != null && photoUrl.isNotEmpty) {
                     if (photoUrl.startsWith('data:image')) {
                       try {
@@ -435,11 +515,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
+  // ============================================================
+  // DELETE MESSAGE
+  // ============================================================
+
   Future<void> _confirmAndDeleteMessage({
     required String messageId,
     required bool mine,
   }) async {
     if (!mine) return;
+
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -459,18 +544,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         );
       },
     );
+
     if (shouldDelete != true) return;
+
     try {
       await _repo.deleteMessage(chatId: widget.chatId, messageId: messageId);
+
       _showError('Message deleted');
     } catch (e) {
       _showError('Failed to delete message: $e');
     }
   }
 
+  // ============================================================
+  // TEXT
+  // ============================================================
+
   Future<void> _sendText() async {
-    final text = _controller.text;
+    final text = _controller.text.trim();
+
+    if (text.isEmpty) return;
+
     _controller.clear();
+
     try {
       await _repo.sendMessage(
         chatId: widget.chatId,
@@ -482,48 +578,214 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
+  // ============================================================
+  // IMAGE - CLOUDINARY
+  // ============================================================
+
   Future<void> _pickImage(ImageSource source) async {
+    if (_isUploadingMedia) return;
+
     final picker = ImagePicker();
-    final image = await picker.pickImage(
-      source: source,
-      imageQuality: 30,
-      maxWidth: 600,
-    );
-    if (image == null) return;
-    final bytes = await image.readAsBytes();
-    if (bytes.isEmpty) return;
-    final base64String = base64Encode(bytes);
-    if (base64String.length > 700 * 1024) {
-      _showError('Image too large. Must be < 700KB.');
-      return;
-    }
+
     try {
+      final image = await picker.pickImage(
+        source: source,
+        imageQuality: 90,
+        maxWidth: 1600,
+      );
+
+      if (image == null) return;
+
+      if (!mounted) return;
+
+      setState(() {
+        _isUploadingMedia = true;
+      });
+
+      _showUploadingImageMessage();
+
+      final MediaItem media = await CloudinaryService.uploadMedia(
+        image.path,
+        MediaType.image,
+      );
+
+      if (!mounted) return;
+
       await _repo.sendMessage(
         chatId: widget.chatId,
         messageType: 'image',
-        base64Data: 'data:image/jpeg;base64,$base64String',
+        fileName: image.name.isNotEmpty ? image.name : 'image.jpg',
+        extraData: {
+          'mediaUrl': media.url,
+          'mediaType': 'image',
+          if (media.publicId != null) 'publicId': media.publicId,
+        },
       );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Image sent successfully'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } on MediaValidationException catch (e) {
+      _showError(e.message);
     } catch (e) {
       _showError('Failed to send image: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingMedia = false;
+        });
+      }
     }
   }
 
+  void _showUploadingImageMessage() {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Expanded(child: Text('Uploading image to Cloudinary...')),
+          ],
+        ),
+        duration: Duration(seconds: 60),
+      ),
+    );
+  }
+
+  // ============================================================
+  // VIDEO - CLOUDINARY
+  // ============================================================
+
+  Future<void> _pickVideo(ImageSource source) async {
+    if (_isUploadingMedia) return;
+
+    final picker = ImagePicker();
+
+    try {
+      final video = await picker.pickVideo(
+        source: source,
+        maxDuration: const Duration(seconds: 60),
+      );
+
+      if (video == null) return;
+
+      if (!mounted) return;
+
+      setState(() {
+        _isUploadingMedia = true;
+      });
+
+      _showUploadingVideoMessage();
+
+      final MediaItem media = await CloudinaryService.uploadMedia(
+        video.path,
+        MediaType.video,
+      );
+
+      if (!mounted) return;
+
+      await _repo.sendMessage(
+        chatId: widget.chatId,
+        messageType: 'video',
+        fileName: video.name.isNotEmpty ? video.name : 'video.mp4',
+        extraData: {
+          'mediaUrl': media.url,
+          'mediaType': 'video',
+          if (media.thumbnailUrl != null) 'thumbnailUrl': media.thumbnailUrl,
+          if (media.publicId != null) 'publicId': media.publicId,
+        },
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Video sent successfully'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } on MediaValidationException catch (e) {
+      _showError(e.message);
+    } catch (e) {
+      _showError('Failed to send video: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingMedia = false;
+        });
+      }
+    }
+  }
+
+  void _showUploadingVideoMessage() {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Expanded(child: Text('Uploading video to Cloudinary...')),
+          ],
+        ),
+        duration: Duration(seconds: 60),
+      ),
+    );
+  }
+
+  // ============================================================
+  // FILE
+  // ============================================================
+
   Future<void> _pickFile() async {
     final result = await fp.FilePicker.pickFiles();
+
     if (result == null || result.files.isEmpty) return;
+
     final file = result.files.first;
+
     if (file.size > 700 * 1024) {
       _showError('File must be less than 700KB');
       return;
     }
+
     Uint8List? bytes;
+
     if (file.bytes != null) {
       bytes = file.bytes;
     } else if (file.path != null) {
       bytes = await File(file.path!).readAsBytes();
     }
+
     if (bytes == null || bytes.isEmpty) return;
+
     final base64String = base64Encode(bytes);
+
     try {
       await _repo.sendMessage(
         chatId: widget.chatId,
@@ -536,17 +798,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
+  // ============================================================
+  // AUDIO RECORDING
+  // ============================================================
+
   Future<void> _toggleRecording() async {
     if (_isRecording) {
       final path = await _audioRecorder.stop();
-      setState(() => _isRecording = false);
+
+      if (mounted) {
+        setState(() => _isRecording = false);
+      }
+
       if (path != null) {
         final bytes = await File(path).readAsBytes();
+
         final base64String = base64Encode(bytes);
+
         if (base64String.length > 700 * 1024) {
           _showError('Audio too large (max ~700KB). Try a shorter clip.');
           return;
         }
+
         try {
           await _repo.sendMessage(
             chatId: widget.chatId,
@@ -560,22 +833,33 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } else {
       if (await _audioRecorder.hasPermission()) {
         final dir = await getTemporaryDirectory();
+
         final path =
             '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
         await _audioRecorder.start(
           const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 32000),
           path: path,
         );
-        setState(() => _isRecording = true);
+
+        if (mounted) {
+          setState(() => _isRecording = true);
+        }
       } else {
         _showError('Microphone permission denied');
       }
     }
   }
 
+  // ============================================================
+  // IMAGE PROVIDER
+  // ============================================================
+
   ImageProvider? _getImageProvider(String? url) {
     if (url == null || url.trim().isEmpty) return null;
+
     final trimmed = url.trim();
+
     if (trimmed.startsWith('data:image')) {
       try {
         final base64String = trimmed.split(',').last;
@@ -584,8 +868,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         return null;
       }
     }
+
     return NetworkImage(trimmed);
   }
+
+  // ============================================================
+  // MESSAGE DATE/TIME
+  // ============================================================
 
   bool _isSameDay(DateTime a, DateTime b) {
     return a.year == b.year && a.month == b.month && a.day == b.day;
@@ -593,6 +882,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   DateTime _messageTime(Map<String, dynamic> data) {
     final ts = data['createdAt'] as Timestamp?;
+
     return ts?.toDate() ?? DateTime.now();
   }
 
@@ -600,8 +890,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   String _formatTime(DateTime dt) {
     final hour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+
     final minute = _twoDigits(dt.minute);
+
     final suffix = dt.hour >= 12 ? 'PM' : 'AM';
+
     return '$hour:$minute $suffix';
   }
 
@@ -620,30 +913,118 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       'Nov',
       'Dec',
     ];
+
     return names[month - 1];
   }
 
   String _formatDayLabel(DateTime dt) {
     final now = DateTime.now();
+
     final today = DateTime(now.year, now.month, now.day);
+
     final messageDay = DateTime(dt.year, dt.month, dt.day);
+
     final diff = today.difference(messageDay).inDays;
+
     if (diff == 0) return 'Today';
+
     if (diff == 1) return 'Yesterday';
+
     return '${dt.day} ${_monthName(dt.month)} ${dt.year}';
   }
 
+  // ============================================================
+  // MESSAGE CONTENT
+  // ============================================================
+
   Widget _buildMessageContent(Map<String, dynamic> data, bool mine) {
     final type = data['messageType'] as String? ?? 'text';
+
     final text = data['text'] as String? ?? '';
+
     final base64Data = data['base64Data'] as String?;
 
-    if (type == 'image' && base64Data != null) {
-      final imgProvider = _getImageProvider(base64Data);
-      if (imgProvider != null) {
+    // ----------------------------------------------------------
+    // IMAGE
+    // ----------------------------------------------------------
+
+    if (type == 'image') {
+      final mediaUrl = data['mediaUrl'] as String?;
+
+      // ========================================================
+      // NEW CLOUDINARY IMAGE
+      // ========================================================
+
+      if (mediaUrl != null && mediaUrl.trim().isNotEmpty) {
         return GestureDetector(
-          onTap:
-              () => Navigator.of(context).push(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => _FullScreenChatImage(imageUrl: mediaUrl.trim()),
+              ),
+            );
+          },
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.network(
+              mediaUrl.trim(),
+              width: 240,
+              fit: BoxFit.contain,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) {
+                  return child;
+                }
+
+                return SizedBox(
+                  width: 240,
+                  height: 180,
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      value:
+                          progress.expectedTotalBytes != null
+                              ? progress.cumulativeBytesLoaded /
+                                  progress.expectedTotalBytes!
+                              : null,
+                    ),
+                  ),
+                );
+              },
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  width: 240,
+                  height: 180,
+                  decoration: BoxDecoration(
+                    color: Colors.black12,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.broken_image_outlined, size: 42),
+                        SizedBox(height: 8),
+                        Text('Unable to load image'),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      }
+
+      // ========================================================
+      // OLD BASE64 IMAGE
+      // ========================================================
+
+      if (base64Data != null && base64Data.isNotEmpty) {
+        final imgProvider = _getImageProvider(base64Data);
+
+        if (imgProvider != null) {
+          return GestureDetector(
+            onTap: () {
+              Navigator.of(context).push(
                 MaterialPageRoute(
                   builder:
                       (_) => PhotoViewerScreen(
@@ -651,19 +1032,82 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         canDownload: true,
                       ),
                 ),
-              ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image(image: imgProvider, width: 200, fit: BoxFit.contain),
-          ),
+              );
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image(image: imgProvider, width: 200, fit: BoxFit.contain),
+            ),
+          );
+        }
+      }
+
+      return const Icon(Icons.broken_image, size: 50);
+    }
+
+    // ----------------------------------------------------------
+    // VIDEO
+    // ----------------------------------------------------------
+
+    if (type == 'video') {
+      final mediaUrl = data['mediaUrl'] as String?;
+
+      if (mediaUrl != null && mediaUrl.trim().isNotEmpty) {
+        final thumbnailUrl = data['thumbnailUrl'] as String?;
+
+        return _ChatVideoBubble(
+          videoUrl: mediaUrl,
+          thumbnailUrl: thumbnailUrl,
+          isMine: mine,
         );
       }
-      return const Icon(Icons.broken_image, size: 50);
-    } else if (type == 'audio' && base64Data != null) {
+
+      // Old Base64 video fallback.
+      if (base64Data != null && base64Data.isNotEmpty) {
+        return _Base64VideoBubble(base64Data: base64Data, isMine: mine);
+      }
+
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.video_library_outlined,
+            color:
+                mine
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'Video unavailable',
+            style: TextStyle(
+              color:
+                  mine
+                      ? Theme.of(context).colorScheme.onPrimary
+                      : Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+        ],
+      );
+    }
+
+    // ----------------------------------------------------------
+    // AUDIO
+    // ----------------------------------------------------------
+
+    if (type == 'audio' && base64Data != null) {
       return _AudioBubble(base64Data: base64Data, isMine: mine);
-    } else if (type == 'file' && base64Data != null) {
+    }
+
+    // ----------------------------------------------------------
+    // FILE
+    // ----------------------------------------------------------
+
+    if (type == 'file' && base64Data != null) {
       final fileName = data['fileName'] as String? ?? 'Document';
+
       final cs = Theme.of(context).colorScheme;
+
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -684,15 +1128,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           ),
         ],
       );
-    } else if (type == 'call_event') {
+    }
+
+    // ----------------------------------------------------------
+    // CALL EVENT
+    // ----------------------------------------------------------
+
+    if (type == 'call_event') {
       final cs = Theme.of(context).colorScheme;
+
       final lower = text.toLowerCase();
+
       final icon =
           lower.contains('missed')
               ? Icons.call_missed
               : lower.contains('declined')
               ? Icons.call_end
               : Icons.phone_disabled;
+
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -709,13 +1162,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           ),
         ],
       );
-    } else if (type == 'call_started') {
+    }
+
+    // ----------------------------------------------------------
+    // CALL STARTED
+    // ----------------------------------------------------------
+
+    if (type == 'call_started') {
       final cs = Theme.of(context).colorScheme;
+
       final isVideo = text == 'video';
+
       final label =
           mine
               ? (isVideo ? 'Outgoing video call' : 'Outgoing voice call')
               : (isVideo ? 'Incoming video call' : 'Incoming voice call');
+
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -736,14 +1198,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           ),
         ],
       );
-    } else if (type == 'call_ended') {
+    }
+
+    // ----------------------------------------------------------
+    // CALL ENDED
+    // ----------------------------------------------------------
+
+    if (type == 'call_ended') {
       final cs = Theme.of(context).colorScheme;
+
       final isVideo = text == 'video';
+
       final secs = (data['durationSeconds'] as num?)?.toInt() ?? 0;
+
       final label =
           isVideo
               ? 'Video call • ${_formatCallDuration(secs)}'
               : 'Voice call • ${_formatCallDuration(secs)}';
+
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -766,12 +1238,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       );
     }
 
+    // ----------------------------------------------------------
+    // NORMAL TEXT
+    // ----------------------------------------------------------
+
     final cs = Theme.of(context).colorScheme;
+
     return Text(
       text,
       style: TextStyle(color: mine ? cs.onPrimary : cs.onSurface, fontSize: 16),
     );
   }
+
+  // ============================================================
+  // BUILD
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
@@ -859,16 +1340,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   ),
                 ),
           ),
-          // ── Group chat menu ───────────────────────────
+
+          // ======================================================
+          // GROUP CHAT MENU
+          // ======================================================
           if (widget.otherUserId.isEmpty)
             StreamBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
               stream: _notifRepo.settingsStream(),
               builder: (context, notifSnapshot) {
                 final notifSettings = notifSnapshot.data?.data();
+
                 final isMuted = _notifRepo.isMuted(
                   notifSettings,
                   widget.chatId,
                 );
+
                 return PopupMenuButton<String>(
                   onSelected: (value) async {
                     if (value == 'view_members') {
@@ -883,11 +1369,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     } else if (value == 'add_members') {
                       final snap =
                           await _repo.chatDocument(widget.chatId).get();
+
                       final participants = List<String>.from(
                         snap.data()?['participants'] ?? [],
                       );
+
                       if (!mounted) return;
-                      // ignore: use_build_context_synchronously
+
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
                           builder:
@@ -903,7 +1391,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   },
                   itemBuilder:
                       (_) => [
-                        // ✅ NEW: View Members
                         const PopupMenuItem<String>(
                           value: 'view_members',
                           child: Row(
@@ -969,15 +1456,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 );
               },
             ),
-          // ── Direct chat menu ──────────────────────────
+
+          // ======================================================
+          // DIRECT CHAT MENU
+          // ======================================================
           if (widget.otherUserId.isNotEmpty)
             StreamBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
               stream: _repo.currentUserStream(),
               builder: (context, snapshot) {
                 final data = snapshot.data?.data();
+
                 final blockedUsers = List<String>.from(
                   data?['blockedUsers'] ?? [],
                 );
+
                 final isBlocked = blockedUsers.contains(widget.otherUserId);
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -990,6 +1482,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   stream: _notifRepo.settingsStream(),
                   builder: (context, notifSnapshot) {
                     final notifSettings = notifSnapshot.data?.data();
+
                     final isMuted = _notifRepo.isMuted(
                       notifSettings,
                       widget.chatId,
@@ -999,10 +1492,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       onSelected: (value) async {
                         if (value == 'block') {
                           await _repo.blockUser(widget.otherUserId);
-                          if (mounted) _showError('User blocked');
+
+                          if (mounted) {
+                            _showError('User blocked');
+                          }
                         } else if (value == 'unblock') {
                           await _repo.unblockUser(widget.otherUserId);
-                          if (mounted) _showError('User unblocked');
+
+                          if (mounted) {
+                            _showError('User unblocked');
+                          }
                         } else if (value == 'mute') {
                           await MuteDialog.show(
                             context,
@@ -1059,6 +1558,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
         ],
       ),
+
+      // ============================================================
+      // BODY
+      // ============================================================
       body: Column(
         children: [
           Expanded(
@@ -1071,12 +1574,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         if (snapshot.hasError) {
                           return Center(child: Text('${snapshot.error}'));
                         }
+
                         if (!snapshot.hasData) {
                           return const Center(
                             child: CircularProgressIndicator(),
                           );
                         }
+
                         final docs = snapshot.data!.docs;
+
                         if (docs.isEmpty) {
                           return const Center(child: Text('Say hello.'));
                         }
@@ -1092,21 +1598,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           itemCount: docs.length,
                           itemBuilder: (context, index) {
                             final doc = docs[index];
+
                             final data = doc.data();
+
                             final messageId = doc.id;
+
                             final senderId = data['senderId'] as String? ?? '';
+
                             final mine = senderId == selfId;
+
                             final sentAt = _messageTime(data);
+
                             final olderMessage =
                                 index + 1 < docs.length
                                     ? docs[index + 1].data()
                                     : null;
+
                             final showDayHeader =
                                 olderMessage == null ||
                                 !_isSameDay(sentAt, _messageTime(olderMessage));
 
                             return Padding(
-                              padding: const EdgeInsets.only(bottom: 12.0),
+                              padding: const EdgeInsets.only(bottom: 12),
                               child: Column(
                                 crossAxisAlignment:
                                     mine
@@ -1115,9 +1628,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                 children: [
                                   if (showDayHeader)
                                     Padding(
-                                      padding: const EdgeInsets.only(
-                                        bottom: 8.0,
-                                      ),
+                                      padding: const EdgeInsets.only(bottom: 8),
                                       child: Center(
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(
@@ -1146,11 +1657,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                         ),
                                       ),
                                     ),
+
                                   if (!mine && widget.otherUserId.isEmpty)
                                     Padding(
                                       padding: const EdgeInsets.only(
-                                        left: 42.0,
-                                        bottom: 4.0,
+                                        left: 42,
+                                        bottom: 4,
                                       ),
                                       child: Text(
                                         (data['senderEmail'] as String? ?? '')
@@ -1162,6 +1674,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                         ),
                                       ),
                                     ),
+
                                   Row(
                                     mainAxisAlignment:
                                         mine
@@ -1172,7 +1685,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                       if (!mine)
                                         Padding(
                                           padding: const EdgeInsets.only(
-                                            right: 8.0,
+                                            right: 8,
                                           ),
                                           child: CircleAvatar(
                                             radius: 14,
@@ -1194,6 +1707,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                                     : null,
                                           ),
                                         ),
+
                                       Flexible(
                                         child: GestureDetector(
                                           onLongPress:
@@ -1242,6 +1756,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                       ),
                                     ],
                                   ),
+
                                   Padding(
                                     padding: EdgeInsets.only(
                                       top: 4,
@@ -1267,6 +1782,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       },
                     ),
           ),
+
+          // ========================================================
+          // COMPOSER
+          // ========================================================
           SafeArea(
             child:
                 _isBlocked
@@ -1304,31 +1823,103 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       ),
                       child: Row(
                         children: [
+                          // ==================================================
+                          // FILE
+                          // ==================================================
                           IconButton(
                             icon: const Icon(
                               Icons.add_circle,
                               color: Colors.blue,
                             ),
-                            onPressed: _pickFile,
+                            tooltip: 'File',
+                            onPressed: _isUploadingMedia ? null : _pickFile,
                           ),
+
+                          // ==================================================
+                          // CAMERA IMAGE
+                          // ==================================================
                           IconButton(
                             icon: const Icon(
                               Icons.camera_alt,
                               color: Colors.blue,
                             ),
-                            onPressed: () => _pickImage(ImageSource.camera),
+                            tooltip: 'Take photo',
+                            onPressed:
+                                _isUploadingMedia
+                                    ? null
+                                    : () => _pickImage(ImageSource.camera),
                           ),
+
+                          // ==================================================
+                          // GALLERY IMAGE
+                          // ==================================================
                           IconButton(
                             icon: const Icon(Icons.photo, color: Colors.blue),
-                            onPressed: () => _pickImage(ImageSource.gallery),
+                            tooltip: 'Photo',
+                            onPressed:
+                                _isUploadingMedia
+                                    ? null
+                                    : () => _pickImage(ImageSource.gallery),
                           ),
+
+                          // ==================================================
+                          // CAMERA VIDEO
+                          // ==================================================
+                          IconButton(
+                            icon:
+                                _isUploadingMedia
+                                    ? const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                    : const Icon(
+                                      Icons.videocam,
+                                      color: Colors.blue,
+                                    ),
+                            tooltip: 'Record video',
+                            onPressed:
+                                _isUploadingMedia
+                                    ? null
+                                    : () => _pickVideo(ImageSource.camera),
+                          ),
+
+                          // ==================================================
+                          // GALLERY VIDEO
+                          // ==================================================
+                          IconButton(
+                            icon: const Icon(
+                              Icons.video_library,
+                              color: Colors.blue,
+                            ),
+                            tooltip: 'Select video',
+                            onPressed:
+                                _isUploadingMedia
+                                    ? null
+                                    : () => _pickVideo(ImageSource.gallery),
+                          ),
+
+                          // ==================================================
+                          // AUDIO
+                          // ==================================================
                           IconButton(
                             icon: Icon(
                               _isRecording ? Icons.stop_circle : Icons.mic,
                               color: _isRecording ? Colors.red : Colors.blue,
                             ),
-                            onPressed: _toggleRecording,
+                            tooltip:
+                                _isRecording
+                                    ? 'Stop recording'
+                                    : 'Voice message',
+                            onPressed:
+                                _isUploadingMedia ? null : _toggleRecording,
                           ),
+
+                          // ==================================================
+                          // TEXT
+                          // ==================================================
                           Expanded(
                             child: Container(
                               decoration: BoxDecoration(
@@ -1344,23 +1935,25 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                                 maxLines: 4,
                                 textInputAction: TextInputAction.send,
                                 onSubmitted: (_) => _sendText(),
-                                decoration: InputDecoration(
+                                decoration: const InputDecoration(
                                   hintText: 'Message',
                                   border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(
+                                  contentPadding: EdgeInsets.symmetric(
                                     horizontal: 16,
                                     vertical: 10,
-                                  ),
-                                  suffixIcon: IconButton(
-                                    icon: const Icon(
-                                      Icons.send,
-                                      color: Colors.blue,
-                                    ),
-                                    onPressed: _sendText,
                                   ),
                                 ),
                               ),
                             ),
+                          ),
+
+                          // ==================================================
+                          // SEND
+                          // ==================================================
+                          IconButton(
+                            icon: const Icon(Icons.send, color: Colors.blue),
+                            tooltip: 'Send',
+                            onPressed: _sendText,
                           ),
                         ],
                       ),
@@ -1372,9 +1965,416 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 }
 
+// ============================================================================
+// CLOUDINARY IMAGE FULL SCREEN VIEWER
+// ============================================================================
+
+class _FullScreenChatImage extends StatelessWidget {
+  const _FullScreenChatImage({required this.imageUrl});
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Photo'),
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 4.0,
+          child: Image.network(
+            imageUrl,
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) {
+                return child;
+              }
+
+              return const CircularProgressIndicator(color: Colors.white);
+            },
+            errorBuilder: (context, error, stackTrace) {
+              return const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.white,
+                    size: 60,
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Unable to load image',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// CLOUDINARY VIDEO BUBBLE
+// ============================================================================
+
+class _ChatVideoBubble extends StatefulWidget {
+  const _ChatVideoBubble({
+    required this.videoUrl,
+    required this.isMine,
+    this.thumbnailUrl,
+  });
+
+  final String videoUrl;
+  final String? thumbnailUrl;
+  final bool isMine;
+
+  @override
+  State<_ChatVideoBubble> createState() => _ChatVideoBubbleState();
+}
+
+class _ChatVideoBubbleState extends State<_ChatVideoBubble> {
+  VideoPlayerController? _controller;
+
+  bool _initialized = false;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      final controller = VideoPlayerController.networkUrl(
+        Uri.parse(widget.videoUrl),
+      );
+
+      _controller = controller;
+
+      await controller.initialize();
+
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() {
+        _initialized = true;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  void _togglePlay() {
+    final controller = _controller;
+
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    if (controller.value.isPlaying) {
+      controller.pause();
+    } else {
+      controller.play();
+    }
+
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasError) {
+      return Container(
+        width: 220,
+        height: 150,
+        decoration: BoxDecoration(
+          color: Colors.black12,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.broken_image_outlined, size: 40),
+              SizedBox(height: 8),
+              Text('Unable to play video'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!_initialized ||
+        _controller == null ||
+        !_controller!.value.isInitialized) {
+      return Container(
+        width: 220,
+        height: 150,
+        decoration: BoxDecoration(
+          color: Colors.black12,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            if (widget.thumbnailUrl != null && widget.thumbnailUrl!.isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.network(
+                  widget.thumbnailUrl!,
+                  width: 220,
+                  height: 150,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            const CircularProgressIndicator(),
+          ],
+        ),
+      );
+    }
+
+    final controller = _controller!;
+
+    final aspectRatio =
+        controller.value.aspectRatio > 0
+            ? controller.value.aspectRatio
+            : 16 / 9;
+
+    return GestureDetector(
+      onTap: _togglePlay,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: 240,
+              child: AspectRatio(
+                aspectRatio: aspectRatio,
+                child: VideoPlayer(controller),
+              ),
+            ),
+
+            AnimatedOpacity(
+              opacity: controller.value.isPlaying ? 0.0 : 1.0,
+              duration: const Duration(milliseconds: 200),
+              child: Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow,
+                  color: Colors.white,
+                  size: 34,
+                ),
+              ),
+            ),
+
+            Positioned(
+              top: 8,
+              left: 8,
+              child: Container(
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(
+                  Icons.videocam,
+                  color: Colors.white,
+                  size: 18,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// BASE64 VIDEO FALLBACK
+// ============================================================================
+
+class _Base64VideoBubble extends StatefulWidget {
+  const _Base64VideoBubble({required this.base64Data, required this.isMine});
+
+  final String base64Data;
+  final bool isMine;
+
+  @override
+  State<_Base64VideoBubble> createState() => _Base64VideoBubbleState();
+}
+
+class _Base64VideoBubbleState extends State<_Base64VideoBubble> {
+  VideoPlayerController? _controller;
+
+  bool _loading = true;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    try {
+      String raw = widget.base64Data;
+
+      if (raw.contains(',')) {
+        raw = raw.split(',').last;
+      }
+
+      final bytes = base64Decode(raw);
+
+      final directory = await getTemporaryDirectory();
+
+      final file = File(
+        '${directory.path}/chat_video_${DateTime.now().millisecondsSinceEpoch}.mp4',
+      );
+
+      await file.writeAsBytes(bytes, flush: true);
+
+      final controller = VideoPlayerController.file(file);
+
+      _controller = controller;
+
+      await controller.initialize();
+
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() {
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _hasError = true;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  void _togglePlay() {
+    final controller = _controller;
+
+    if (controller == null || !controller.value.isInitialized) {
+      return;
+    }
+
+    if (controller.value.isPlaying) {
+      controller.pause();
+    } else {
+      controller.play();
+    }
+
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const SizedBox(
+        width: 220,
+        height: 150,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_hasError || _controller == null || !_controller!.value.isInitialized) {
+      return const SizedBox(
+        width: 220,
+        height: 100,
+        child: Center(child: Text('Unable to play video')),
+      );
+    }
+
+    final controller = _controller!;
+
+    final aspectRatio =
+        controller.value.aspectRatio > 0
+            ? controller.value.aspectRatio
+            : 16 / 9;
+
+    return GestureDetector(
+      onTap: _togglePlay,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: 240,
+              child: AspectRatio(
+                aspectRatio: aspectRatio,
+                child: VideoPlayer(controller),
+              ),
+            ),
+            if (!controller.value.isPlaying)
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow,
+                  color: Colors.white,
+                  size: 34,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// AUDIO BUBBLE
+// ============================================================================
+
 class _AudioBubble extends StatefulWidget {
   final String base64Data;
   final bool isMine;
+
   const _AudioBubble({required this.base64Data, required this.isMine});
 
   @override
@@ -1383,23 +2383,35 @@ class _AudioBubble extends StatefulWidget {
 
 class _AudioBubbleState extends State<_AudioBubble> {
   final AudioPlayer _player = AudioPlayer();
+
   bool _isPlaying = false;
+
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
 
   @override
   void initState() {
     super.initState();
+
     try {
       _player.setSource(BytesSource(base64Decode(widget.base64Data)));
+
       _player.onPlayerStateChanged.listen((state) {
-        if (mounted) setState(() => _isPlaying = state == PlayerState.playing);
+        if (mounted) {
+          setState(() => _isPlaying = state == PlayerState.playing);
+        }
       });
+
       _player.onDurationChanged.listen((d) {
-        if (mounted) setState(() => _duration = d);
+        if (mounted) {
+          setState(() => _duration = d);
+        }
       });
+
       _player.onPositionChanged.listen((p) {
-        if (mounted) setState(() => _position = p);
+        if (mounted) {
+          setState(() => _position = p);
+        }
       });
     } catch (_) {}
   }

@@ -41,28 +41,38 @@ class ChatRepository {
     final display = nickname.trim();
     final key = nicknameDocKey(display);
     final nickRef = _db.collection('nicknames').doc(key);
+
     var taken = false;
+
     await _db.runTransaction((txn) async {
       final snap = await txn.get(nickRef);
+
       if (snap.exists) {
         final existing = snap.data()?['uid'] as String?;
+
         if (existing != null && existing != uid) {
           taken = true;
           return;
         }
       }
+
       txn.set(nickRef, {
         'uid': uid,
         'displayName': display,
         'updatedAt': FieldValue.serverTimestamp(),
       });
     });
-    if (taken) throw NicknameTakenException();
+
+    if (taken) {
+      throw NicknameTakenException();
+    }
   }
 
   Future<void> releaseNicknameIfOwnedBy(String nicknameKey, String uid) async {
     final ref = _db.collection('nicknames').doc(nicknameKey);
+
     final snap = await ref.get();
+
     if (snap.exists && snap.data()?['uid'] == uid) {
       await ref.delete();
     }
@@ -75,6 +85,7 @@ class ChatRepository {
     String? displayName,
   }) async {
     final cur = _auth.currentUser;
+
     if (cur != null &&
         cur.uid == uid &&
         !cur.emailVerified &&
@@ -83,24 +94,25 @@ class ChatRepository {
     }
 
     final docRef = _db.collection('users').doc(uid);
+
     final existing = await docRef.get();
 
     final data = <String, dynamic>{
       'email': email,
       'updatedAt': FieldValue.serverTimestamp(),
     };
-    if (photoUrl != null) data['photoUrl'] = photoUrl;
+
+    if (photoUrl != null) {
+      data['photoUrl'] = photoUrl;
+    }
+
     if (displayName != null && displayName.trim().isNotEmpty) {
       data['displayName'] = displayName.trim();
     }
+
     if (!existing.exists) {
       data['createdAt'] = FieldValue.serverTimestamp();
-      // FIX: every new user doc now gets an explicit status on creation,
-      // so the admin console's "Active" filter (which queries
-      // status == 'active' server-side) actually finds them. Only set on
-      // first creation — never overwrite an existing doc's status here, or
-      // a returning user who was flagged/suspended by an admin would get
-      // silently reset back to 'active' on their next login.
+
       data['status'] = 'active';
     }
 
@@ -109,20 +121,26 @@ class ChatRepository {
 
   Future<void> syncCurrentUserProfileDocument() async {
     final user = _auth.currentUser;
+
     if (user == null) return;
     if (!user.emailVerified) return;
 
     final pending = EmailRegistrationSession.pendingProfilePhotoBytes;
+
     if (pending != null) {
       try {
         await user.getIdToken();
+
         await updateProfilePhoto(pending);
+
         EmailRegistrationSession.clearPendingProfilePhoto();
       } catch (_) {}
     }
 
     final doc = await _db.collection('users').doc(user.uid).get();
+
     String? photoUrl = doc.data()?['photoUrl'] as String?;
+
     photoUrl ??= user.photoURL;
 
     await ensureUserDocument(
@@ -135,9 +153,13 @@ class ChatRepository {
 
   Future<String> updateProfilePhoto(Uint8List bytes) async {
     final user = _auth.currentUser;
-    if (user == null) throw Exception('Not logged in');
+
+    if (user == null) {
+      throw Exception('Not logged in');
+    }
 
     final base64String = base64Encode(bytes);
+
     final photoUrl = 'data:image/jpeg;base64,$base64String';
 
     try {
@@ -154,13 +176,19 @@ class ChatRepository {
     return photoUrl;
   }
 
-  /// Removes the current user's profile photo from Auth and Firestore.
+  /// Removes the current user's profile photo
+  /// from Auth and Firestore.
   Future<void> deleteProfilePhoto() async {
     final user = _auth.currentUser;
-    if (user == null) throw Exception('Not logged in');
+
+    if (user == null) {
+      throw Exception('Not logged in');
+    }
+
     try {
       await user.updatePhotoURL(null);
     } catch (_) {}
+
     await _db.collection('users').doc(user.uid).update({
       'photoUrl': FieldValue.delete(),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -168,40 +196,52 @@ class ChatRepository {
   }
 
   /// Changes the current user's display name + nickname atomically.
-  /// Releases the old nickname key and claims the new one in one transaction.
-  /// Throws [NicknameTakenException] if the new nickname is already taken.
+  ///
+  /// Releases the old nickname key and claims the new one
+  /// in one transaction.
+  ///
+  /// Throws [NicknameTakenException] if the new nickname
+  /// is already taken.
   Future<void> changeNickname(String newNickname) async {
     final user = _auth.currentUser;
-    if (user == null) throw Exception('Not logged in');
+
+    if (user == null) {
+      throw Exception('Not logged in');
+    }
 
     final display = newNickname.trim();
     final newKey = nicknameDocKey(display);
+
     final newRef = _db.collection('nicknames').doc(newKey);
 
-    // Find current nickname key to release
     final oldKey =
         user.displayName != null ? nicknameDocKey(user.displayName!) : null;
+
     final oldRef =
         oldKey != null ? _db.collection('nicknames').doc(oldKey) : null;
 
     var taken = false;
+
     await _db.runTransaction((txn) async {
       final newSnap = await txn.get(newRef);
+
       if (newSnap.exists) {
         final existing = newSnap.data()?['uid'] as String?;
+
         if (existing != null && existing != user.uid) {
           taken = true;
           return;
         }
       }
-      // Release old key (if different)
+
       if (oldRef != null && oldKey != newKey) {
         final oldSnap = await txn.get(oldRef);
+
         if (oldSnap.exists && oldSnap.data()?['uid'] == user.uid) {
           txn.delete(oldRef);
         }
       }
-      // Claim new key
+
       txn.set(newRef, {
         'uid': user.uid,
         'displayName': display,
@@ -209,15 +249,21 @@ class ChatRepository {
       });
     });
 
-    if (taken) throw NicknameTakenException();
+    if (taken) {
+      throw NicknameTakenException();
+    }
 
-    // Update Auth display name + Firestore user doc
     await user.updateDisplayName(display);
+
     await _db.collection('users').doc(user.uid).update({
       'displayName': display,
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
+
+  // ============================================================
+  // CHAT DOCUMENT
+  // ============================================================
 
   Future<void> ensureChatDocument({
     required String chatId,
@@ -229,17 +275,26 @@ class ChatRepository {
     }, SetOptions(merge: true));
   }
 
-  /// Returns a typed reference to a chat document.
   DocumentReference<Map<String, dynamic>> chatDocument(String chatId) =>
       _db.collection('chats').doc(chatId);
 
+  // ============================================================
+  // USERS
+  // ============================================================
+
   Stream<QuerySnapshot<Map<String, dynamic>>> usersExceptSelf() {
     final uid = _auth.currentUser?.uid;
+
     if (uid == null) {
       return _db.collection('users').limit(0).snapshots();
     }
+
     return _db.collection('users').snapshots();
   }
+
+  // ============================================================
+  // MESSAGES
+  // ============================================================
 
   Stream<QuerySnapshot<Map<String, dynamic>>> messages(String chatId) {
     return _db
@@ -251,6 +306,10 @@ class ChatRepository {
         .snapshots();
   }
 
+  // ============================================================
+  // SEND MESSAGE
+  // ============================================================
+
   Future<void> sendMessage({
     required String chatId,
     String text = '',
@@ -260,12 +319,38 @@ class ChatRepository {
     Map<String, dynamic>? extraData,
   }) async {
     final user = _auth.currentUser;
+
     if (user == null) return;
+
     final trimmed = text.trim();
-    if (trimmed.isEmpty && base64Data == null) return;
+
+    // ----------------------------------------------------------
+    // IMPORTANT:
+    //
+    // A Cloudinary video does not use base64Data.
+    //
+    // It is stored in extraData as:
+    //
+    // mediaUrl
+    // thumbnailUrl
+    // publicId
+    //
+    // Therefore we must allow the message when mediaUrl exists.
+    // ----------------------------------------------------------
+
+    final mediaUrl = extraData?['mediaUrl'] as String?;
+
+    final hasMediaUrl = mediaUrl != null && mediaUrl.trim().isNotEmpty;
+
+    // Do not create completely empty messages.
+    if (trimmed.isEmpty && base64Data == null && !hasMediaUrl) {
+      return;
+    }
 
     final batch = _db.batch();
+
     final chatRef = _db.collection('chats').doc(chatId);
+
     final messageRef = chatRef.collection('messages').doc();
 
     final messageData = <String, dynamic>{
@@ -275,64 +360,148 @@ class ChatRepository {
       'messageType': messageType,
       'createdAt': FieldValue.serverTimestamp(),
     };
-    if (base64Data != null) messageData['base64Data'] = base64Data;
-    if (fileName != null) messageData['fileName'] = fileName;
+
+    // ----------------------------------------------------------
+    // OLD BASE64 MEDIA
+    // ----------------------------------------------------------
+
+    if (base64Data != null) {
+      messageData['base64Data'] = base64Data;
+    }
+
+    // ----------------------------------------------------------
+    // FILE NAME
+    // ----------------------------------------------------------
+
+    if (fileName != null && fileName.trim().isNotEmpty) {
+      messageData['fileName'] = fileName.trim();
+    }
+
+    // ----------------------------------------------------------
+    // CLOUDINARY MEDIA
+    //
+    // Example:
+    //
+    // {
+    //   mediaUrl: "...",
+    //   thumbnailUrl: "...",
+    //   publicId: "..."
+    // }
+    // ----------------------------------------------------------
+
     if (extraData != null && extraData.isNotEmpty) {
       messageData.addAll(extraData);
     }
 
     batch.set(messageRef, messageData);
 
+    // ==========================================================
+    // CHAT LIST PREVIEW
+    // ==========================================================
+
     String lastMsg = trimmed;
-    if (messageType == 'image') lastMsg = '📷 Image';
-    if (messageType == 'audio') lastMsg = '🎤 Voice message';
-    if (messageType == 'file') lastMsg = '📎 File';
+
+    if (messageType == 'image') {
+      lastMsg = '📷 Image';
+    }
+
+    if (messageType == 'video') {
+      lastMsg = '📹 Video';
+    }
+
+    if (messageType == 'audio') {
+      lastMsg = '🎤 Voice message';
+    }
+
+    if (messageType == 'file') {
+      lastMsg = '📎 File';
+    }
+
     if (messageType == 'call_started') {
       lastMsg = trimmed == 'video' ? '📹 Video call' : '📞 Voice call';
     }
+
     if (messageType == 'call_ended') {
       lastMsg =
           trimmed == 'video' ? '📹 Video call ended' : '📞 Voice call ended';
     }
-    if (messageType == 'call_event') lastMsg = trimmed;
+
+    if (messageType == 'call_event') {
+      lastMsg = trimmed;
+    }
 
     batch.set(chatRef, {
       'lastMessage': lastMsg,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+
     await batch.commit();
   }
 
+  // ============================================================
+  // MESSAGE PREVIEW
+  // ============================================================
+
   String _messagePreviewFromData(Map<String, dynamic> data) {
     final type = (data['messageType'] as String?) ?? 'text';
+
     final text = (data['text'] as String?)?.trim() ?? '';
-    if (type == 'image') return '📷 Image';
-    if (type == 'audio') return '🎤 Voice message';
-    if (type == 'file') return '📎 File';
+
+    if (type == 'image') {
+      return '📷 Image';
+    }
+
+    if (type == 'video') {
+      return '📹 Video';
+    }
+
+    if (type == 'audio') {
+      return '🎤 Voice message';
+    }
+
+    if (type == 'file') {
+      return '📎 File';
+    }
+
     if (type == 'call_started') {
       return text == 'video' ? '📹 Video call' : '📞 Voice call';
     }
+
     if (type == 'call_ended') {
       return text == 'video' ? '📹 Video call ended' : '📞 Voice call ended';
     }
-    if (type == 'call_event') return text.isEmpty ? 'Call update' : text;
+
+    if (type == 'call_event') {
+      return text.isEmpty ? 'Call update' : text;
+    }
+
     return text.isEmpty ? 'Message' : text;
   }
+
+  // ============================================================
+  // DELETE MESSAGE
+  // ============================================================
 
   Future<void> deleteMessage({
     required String chatId,
     required String messageId,
   }) async {
     final user = _auth.currentUser;
+
     if (user == null) return;
 
     final chatRef = _db.collection('chats').doc(chatId);
+
     final messageRef = chatRef.collection('messages').doc(messageId);
+
     final snap = await messageRef.get();
+
     if (!snap.exists) return;
 
     final data = snap.data() ?? <String, dynamic>{};
+
     final senderId = data['senderId'] as String?;
+
     if (senderId != user.uid) {
       throw Exception('You can only delete your own messages.');
     }
@@ -357,14 +526,22 @@ class ChatRepository {
     }, SetOptions(merge: true));
   }
 
+  // ============================================================
+  // GROUP CHAT
+  // ============================================================
+
   Future<String> createGroupChat(
     String groupName,
     List<String> participantIds,
   ) async {
     final user = _auth.currentUser;
-    if (user == null) throw Exception('Not logged in');
+
+    if (user == null) {
+      throw Exception('Not logged in');
+    }
 
     final chatRef = _db.collection('chats').doc();
+
     if (!participantIds.contains(user.uid)) {
       participantIds.add(user.uid);
     }
@@ -382,12 +559,12 @@ class ChatRepository {
   }
 
   /// Adds [newMemberIds] to an existing group chat.
-  /// Uses arrayUnion so duplicate IDs are automatically ignored.
   Future<void> addMembersToGroup(
     String chatId,
     List<String> newMemberIds,
   ) async {
     if (newMemberIds.isEmpty) return;
+
     await _db.collection('chats').doc(chatId).update({
       'participants': FieldValue.arrayUnion(newMemberIds),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -396,7 +573,11 @@ class ChatRepository {
 
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> groupChatsStream() {
     final uid = _auth.currentUser?.uid;
-    if (uid == null) return Stream.value([]);
+
+    if (uid == null) {
+      return Stream.value([]);
+    }
+
     return _db
         .collection('chats')
         .where('participants', arrayContains: uid)
@@ -406,15 +587,19 @@ class ChatRepository {
               snapshot.docs
                   .where((doc) => doc.data()['isGroup'] == true)
                   .toList();
+
           docs.sort((a, b) {
             final timeA =
                 (a.data()['updatedAt'] as Timestamp?)?.toDate() ??
                 DateTime.fromMillisecondsSinceEpoch(0);
+
             final timeB =
                 (b.data()['updatedAt'] as Timestamp?)?.toDate() ??
                 DateTime.fromMillisecondsSinceEpoch(0);
+
             return timeB.compareTo(timeA);
           });
+
           return docs;
         });
   }
@@ -422,7 +607,11 @@ class ChatRepository {
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>>
   directChatsStream() {
     final uid = _auth.currentUser?.uid;
-    if (uid == null) return Stream.value([]);
+
+    if (uid == null) {
+      return Stream.value([]);
+    }
+
     return _db
         .collection('chats')
         .where('participants', arrayContains: uid)
@@ -432,28 +621,46 @@ class ChatRepository {
               snapshot.docs
                   .where((doc) => doc.data()['isGroup'] != true)
                   .toList();
+
           docs.sort((a, b) {
             final timeA =
                 (a.data()['updatedAt'] as Timestamp?)?.toDate() ??
                 DateTime.fromMillisecondsSinceEpoch(0);
+
             final timeB =
                 (b.data()['updatedAt'] as Timestamp?)?.toDate() ??
                 DateTime.fromMillisecondsSinceEpoch(0);
+
             return timeB.compareTo(timeA);
           });
+
           return docs;
         });
   }
 
+  // ============================================================
+  // CURRENT USER
+  // ============================================================
+
   Stream<DocumentSnapshot<Map<String, dynamic>>?> currentUserStream() {
     final uid = _auth.currentUser?.uid;
-    if (uid == null) return Stream.value(null);
+
+    if (uid == null) {
+      return Stream.value(null);
+    }
+
     return _db.collection('users').doc(uid).snapshots();
   }
 
+  // ============================================================
+  // BLOCKING
+  // ============================================================
+
   Future<void> blockUser(String blockedUid) async {
     final uid = _auth.currentUser?.uid;
+
     if (uid == null) return;
+
     await _db.collection('users').doc(uid).set({
       'blockedUsers': FieldValue.arrayUnion([blockedUid]),
     }, SetOptions(merge: true));
@@ -461,52 +668,72 @@ class ChatRepository {
 
   Future<void> unblockUser(String blockedUid) async {
     final uid = _auth.currentUser?.uid;
+
     if (uid == null) return;
+
     await _db.collection('users').doc(uid).set({
       'blockedUsers': FieldValue.arrayRemove([blockedUid]),
     }, SetOptions(merge: true));
   }
 
+  // ============================================================
+  // LEAVE GROUP
+  // ============================================================
+
   /// Removes the current user from a group chat's participants list.
-  /// - If they are the last member, deletes the group document entirely.
-  /// - If they are the admin, transfers admin to the next remaining member.
+  ///
+  /// If they are the last member, deletes the group document.
+  /// If they are the admin, transfers admin to the next member.
   Future<void> leaveGroupChat(String chatId) async {
     final uid = _auth.currentUser?.uid;
+
     if (uid == null) return;
 
     final chatRef = _db.collection('chats').doc(chatId);
+
     final snap = await chatRef.get();
+
     if (!snap.exists) return;
 
     final data = snap.data()!;
+
     final participants = List<String>.from(data['participants'] ?? []);
+
     participants.remove(uid);
 
     if (participants.isEmpty) {
-      // Last member — delete the whole group
       await chatRef.delete();
     } else {
       final update = <String, dynamic>{
         'participants': participants,
         'updatedAt': FieldValue.serverTimestamp(),
       };
-      // Hand off admin to the next member if needed
+
       if (data['admin'] == uid) {
         update['admin'] = participants.first;
       }
+
       await chatRef.update(update);
     }
   }
 
+  // ============================================================
+  // FETCH USERS
+  // ============================================================
+
   /// Fetches multiple user documents in parallel by their UIDs.
-  /// Returns a map of uid -> user data. Missing users are excluded.
+  ///
+  /// Returns a map of uid -> user data.
+  /// Missing users are excluded.
   Future<Map<String, Map<String, dynamic>>> fetchUsersByIds(
     List<String> uids,
   ) async {
     if (uids.isEmpty) return {};
+
     final snaps = await Future.wait(
       uids.map((id) => _db.collection('users').doc(id).get()),
     );
+
     return {
       for (final s in snaps)
         if (s.exists) s.id: s.data()!,
